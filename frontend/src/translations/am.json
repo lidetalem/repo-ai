@@ -1,0 +1,64 @@
+{
+  "login": {
+    "title": "የአማራ ሚዲያ ኮርፖሬሽን የደህንነት መግቢያ",
+    "subtitle": "በባዮሜትሪክስ የተደገፈ የደህንነት ቁጥጥር",
+    "username": "መለያ ስም",
+    "password": "የይለፍ ቃል",
+    "warning": "ለተፈቀደለት አካል ብቻ",
+    "submit": "ግባ",
+    "loading": "በማጣራት ላይ...",
+    "error": "የተሳሳተ መለያ ስም ወይም የይለፍ ቃል",
+    "exp":"የተሻሻለ መግቢያ",
+    "welcome": "እንኳን ወደ AMECO በሰላም መጡ",
+    "security_system": "የደህንነት ቁጥጥር ስርዓት",
+    "button": "ግባ",
+    "error_empty": "እባክዎን ሁሉንም መስኮች ይሙሉ",
+    "error_invalid": "ትክክለኛ ያልሆነ መለያ ስም ወይም የይለፍ ቃል"
+  },
+  "nav": {
+    "dashboard": "ዋና ገጽ",
+    "guards": "የጥበቃ አባላት",
+    "staff": "የሰራተኞች ዝርዝር",
+    "visitors": "የጎብኝዎች መዝገብ",
+    "reports": "የእንቅስቃሴ ሪፖርት",
+    "cameras": "የበር መቆጣጠሪያ",
+    "logout": "ውጣ",
+    "settings": "ቅንብሮች"
+  },
+  "scan": {
+    "status": "የስካነሩ ሁኔታ",
+    "instruction": "ፊትን በክፈፉ ውስጥ ያስገቡ",
+    "result_accepted": "ተፈቅዷል",
+    "result_rejected": "አልተፈቀደም",
+    "result_spoof": "የማጭበርበር ሙከራ ተገኝቷል",
+    "result_limit": "የሙከራ ገደብ አልፏል",
+    "unknown": "ያልታወቀ ሰው"
+  },
+  "gate": {
+    "power": "ኃይል",
+    "status": "የሲስተሙ ሁኔታ",
+    "active": "በስራ ላይ",
+    "maintenance": "ጥገና ላይ",
+    "open": "በሩን ክፈት",
+    "close": "በሩን ዝጋ"
+  },
+  "common": {
+    "save": "አስቀምጥ",
+    "cancel": "ሰርዝ",
+    "delete": "አጥፋ",
+    "search": "ፈልግ...",
+    "ethiopian_date": "የኢትዮጵያ ቀን",
+    "language": "ቋንቋ",
+    "appearance": "ገጽታ",
+    "light": "ብርሃን",
+    "dark": "ጨለማ",
+    "amharic": "አማርኛ",
+    "english": "English"
+  },
+  "scanner": {
+    "unauthorized": "ያልተፈቀደ",
+    "spoof_detected": "ፎቶ ነው",
+    "limit_reached": "4 ጊዜ ሞክረዋል። ከ5 ደቂቃ በኋላ ተመለሱ።"
+  }
+
+}

@@ -1,0 +1,65 @@
+{
+  "login": {
+    "title": "AMECO Security Portal",
+    "subtitle": "Biometric Access Control System",
+    "username": "Username",
+    "password": "Password",
+    "warning": "Autorized Personnel Only",
+    "submit": "Sign In",
+    "loading": "Authenticating...",
+    "error": "Invalid username or password",
+    "exp":"SECURE BIOMETRIC ACCESS",
+    "welcome": "Welcome to AMECO",
+    "security_system": "Security System",
+    "button": "Login",
+    "error_empty": "Please fill in all fields",
+    "error_invalid": "Invalid username or password"
+
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "guards": "Guard Management",
+    "staff": "Staff Directory",
+    "visitors": "Visitor Logs",
+    "reports": "Audit Logs",
+    "cameras": "Gate Control",
+    "logout": "Sign Out",
+    "settings": "Settings"
+  },
+  "scan": {
+    "status": "Scanner Status",
+    "instruction": "Position face within the frame",
+    "result_accepted": "ACCESS GRANTED",
+    "result_rejected": "ACCESS DENIED",
+    "result_spoof": "SPOOFING DETECTED",
+    "result_limit": "ATTEMPT LIMIT EXCEEDED",
+    "unknown": "Unknown Person"
+  },
+  "gate": {
+    "power": "Power",
+    "status": "System Status",
+    "active": "Active",
+    "maintenance": "Maintenance",
+    "open": "Open Gate",
+    "close": "Close Gate"
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "search": "Search...",
+    "ethiopian_date": "Ethiopian Date",
+    "language": "Language",
+    "appearance": "Appearance",
+    "light": "Light",
+    "dark": "Dark",
+    "amharic": "አማርኛ",
+    "english": "English"
+  },
+  "scanner": {
+    "unauthorized": "UNAUTHORIZED",
+    "spoof_detected": "SPOOFING DETECTED",
+    "limit_reached": "You have reached 4 attempts. Please return after 5 minutes."
+  }
+  
+}
