@@ -5,6 +5,7 @@ import DataTable from '../../components/DataTable'
 import Modal from '../../components/Modal'
 import RegistrationForm from '../../components/RegistrationForm'
 import { guardsAPI, BASE_URL } from '../../services/api'
+import PersonDetailModal from '../../components/PersonDetailModal'
 import { useLang } from '../../context/LanguageContext'
 import { usePrivilege } from '../../hooks/usePrivilege'
 import AccessDenied from '../../components/AccessDenied'
@@ -196,37 +197,13 @@ export default function GuardsPage() {
         />
       </Modal>
 
-      <Modal open={!!viewItem} onClose={() => setViewItem(null)} title="Guard Details">
-        {viewItem && (
-          <div className="space-y-3 text-sm">
-            {/* Profile image in view modal */}
-            {viewItem.profile_image && (
-              <div className="flex justify-center mb-2">
-                <img
-                  src={getImageUrl(viewItem.profile_image)}
-                  alt="Profile"
-                  className="w-20 h-20 rounded-2xl object-cover"
-                  style={{ border: '2px solid var(--color-border-main)' }}
-                />
-              </div>
-            )}
-            {[
-              ['Name',          `${viewItem.first_name} ${viewItem.middle_name} ${viewItem.last_name}`],
-              ['Username',      viewItem.username],
-              ['Digital ID',    viewItem.digital_id],
-              ['Phone',         viewItem.phone_number],
-              ['Guard Tag',     viewItem.guard_tag],
-              ['Gates Assigned',viewItem.gates_assigned_to],
-              ['Registered At', viewItem.registered_at ? new Date(viewItem.registered_at).toLocaleString() : '—'],
-            ].map(([label, value]) => (
-              <div key={label} className="flex gap-3">
-                <span className="w-36 flex-shrink-0 font-semibold" style={{ color: 'var(--color-text-muted)' }}>{label}</span>
-                <span style={{ color: 'var(--color-text-main)' }}>{value || '—'}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </Modal>
+      {viewItem && (
+        <PersonDetailModal
+          person={viewItem}
+          type="guard"
+          onClose={() => setViewItem(null)}
+        />
+      )}
     </div>
   )
 }

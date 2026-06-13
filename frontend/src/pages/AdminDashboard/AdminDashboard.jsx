@@ -18,7 +18,6 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useAuth } from '../../context/AuthContext'
 import { useLang } from '../../context/LanguageContext'
 import { useTheme } from '../../context/ThemeContext'
-import { useNotifications } from '../../context/NotificationContext'
 import logoImage from '../../assets/logo.png'
 
 const BASE_URL = 'http://127.0.0.1:8000'
@@ -35,7 +34,7 @@ import StaffPage         from './StaffPage'
 import VisitorsPage      from './VisitorsPage'
 import CamerasPage       from './CamerasPage'
 import LogsPage          from './LogsPage'
-import NotificationsPage from './NotificationsPage'
+/* notifications removed */
 import SettingsPage      from './SettingsPage'
 
 const NAV = [
@@ -61,7 +60,6 @@ export default function AdminDashboard() {
   const { user, logout }        = useAuth()
   const { lang, switchLang }    = useLang()
   const { theme, toggle }       = useTheme()
-  const { unreadCount }         = useNotifications()
   const navigate                = useNavigate()
   const [profileOpen, setPO]    = useState(false)
   const profileRef              = useRef(null)
@@ -208,12 +206,7 @@ export default function AdminDashboard() {
                      onMouseLeave={e=>{ if(!isActive) e.currentTarget.style.background='transparent' }}>
                   <Icon size={18} className="flex-shrink-0"/>
                   <span className="flex-1 truncate">{L[key]||key}</span>
-                  {key==='requests' && unreadCount>0 && (
-                    <span className="text-xs font-bold px-1.5 py-0.5 rounded-full"
-                          style={{ background:'#cc0000', color:'white', minWidth:'20px', textAlign:'center' }}>
-                      {unreadCount}
-                    </span>
-                  )}
+                  {/* notification badge removed */}
                 </div>
               )}
             </NavLink>
@@ -232,7 +225,7 @@ export default function AdminDashboard() {
             <Route path="visitors/*"      element={<VisitorsPage />} />
             <Route path="cameras/*"       element={<CamerasPage />} />
             <Route path="logs/*"          element={<LogsPage />} />
-            <Route path="notifications/*" element={<NotificationsPage />} />
+            {/* notifications page removed */}
             <Route path="settings/*"      element={<SettingsPage />} />
             <Route path="*"               element={<Navigate to="/admin" replace />} />
           </Routes>

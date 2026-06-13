@@ -5,13 +5,12 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useAuth } from '../../context/AuthContext'
 import { useLang } from '../../context/LanguageContext'
 import { useTheme } from '../../context/ThemeContext'
-import { useNotifications } from '../../context/NotificationContext'
 
 import GuardOverview from './GuardOverview'
 import GuardFaceScannerPage from './GuardFaceScannerPage'
 import GuardVisitorRequestsPage from './GuardVisitorRequestsPage'
 import GuardScannedPage from './GuardScannedPage'
-import NotificationsPage from '../AdminDashboard/NotificationsPage'
+/* notifications removed */
 import SettingsPage from '../AdminDashboard/SettingsPage'
 
 const NAV = [
@@ -30,7 +29,6 @@ export default function GuardDashboard() {
   const { user, logout }     = useAuth()
   const { lang, switchLang } = useLang()
   const { theme, toggle }    = useTheme()
-  const { unreadCount }      = useNotifications()
   const navigate             = useNavigate()
   const [profileOpen, setPO] = useState(false)
   const profileRef           = useRef(null)
@@ -98,7 +96,7 @@ export default function GuardDashboard() {
                 <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all" style={{ background: isActive ? 'linear-gradient(135deg,#cc0000,#aa0000)' : 'transparent', color: isActive ? 'white' : 'var(--color-text-muted)', boxShadow: isActive ? '0 4px 12px rgba(204,0,0,0.3)' : 'none' }} onMouseEnter={e=>{ if(!isActive) e.currentTarget.style.background='var(--color-card-hover)' }} onMouseLeave={e=>{ if(!isActive) e.currentTarget.style.background='transparent' }}>
                   <Icon size={18} className="flex-shrink-0"/>
                   <span className="flex-1 truncate">{L[key]||key}</span>
-                  {key==='visitors' && unreadCount>0 && (<span className="text-xs font-bold px-1.5 py-0.5 rounded-full" style={{ background:'#cc0000', color:'white', minWidth:'20px', textAlign:'center' }}>{unreadCount}</span>)}
+                  {/* notification badge removed */}
                 </div>
               )}
             </NavLink>
@@ -113,7 +111,7 @@ export default function GuardDashboard() {
             <Route path="scanner/*" element={<GuardFaceScannerPage />} />
             <Route path="visitors/*" element={<GuardVisitorRequestsPage />} />
             <Route path="scanned/*" element={<GuardScannedPage />} />
-            <Route path="notifications/*" element={<NotificationsPage />} />
+            {/* notifications page removed */}
             <Route path="settings/*" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/guard" replace />} />
           </Routes>

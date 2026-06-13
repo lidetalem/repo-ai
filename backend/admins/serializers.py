@@ -30,6 +30,23 @@ class AdminProfileSerializer(serializers.ModelSerializer):
     face_scan_5_base64   = serializers.CharField(write_only=True, required=False, allow_blank=True)
     id_card_front_base64 = serializers.CharField(write_only=True, required=False, allow_blank=True)
     id_card_back_base64  = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    # Read-only image URL fields (populate from BiometricData)
+    face_front = serializers.SerializerMethodField(read_only=True)
+    face_left = serializers.SerializerMethodField(read_only=True)
+    face_right = serializers.SerializerMethodField(read_only=True)
+    face_down = serializers.SerializerMethodField(read_only=True)
+    face_unusual = serializers.SerializerMethodField(read_only=True)
+    face_scan_1 = serializers.SerializerMethodField(read_only=True)
+    face_scan_2 = serializers.SerializerMethodField(read_only=True)
+    face_scan_3 = serializers.SerializerMethodField(read_only=True)
+    face_scan_4 = serializers.SerializerMethodField(read_only=True)
+    face_scan_5 = serializers.SerializerMethodField(read_only=True)
+    id_card_front = serializers.SerializerMethodField(read_only=True)
+    id_card_back = serializers.SerializerMethodField(read_only=True)
+    profile_image_url = serializers.SerializerMethodField(read_only=True)
+    # Alias expected by some frontend views: expose profile image under `profile_image`
+    profile_image = serializers.SerializerMethodField(read_only=True)
+    id_card_image = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model  = AdminProfile
@@ -89,6 +106,53 @@ class AdminProfileSerializer(serializers.ModelSerializer):
         data['privileges']     = instance.privileges    or []
         data['is_super_admin'] = instance.is_super_admin
         return data
+
+    # ── Read-only image URLs (delegate to module helpers) ───────────────────
+    def get_face_front(self, obj):
+        return get_face_front(obj, self.context)
+
+    def get_face_left(self, obj):
+        return get_face_left(obj, self.context)
+
+    def get_face_right(self, obj):
+        return get_face_right(obj, self.context)
+
+    def get_face_down(self, obj):
+        return get_face_down(obj, self.context)
+
+    def get_face_unusual(self, obj):
+        return get_face_unusual(obj, self.context)
+
+    def get_face_scan_1(self, obj):
+        return get_face_scan_1(obj, self.context)
+
+    def get_face_scan_2(self, obj):
+        return get_face_scan_2(obj, self.context)
+
+    def get_face_scan_3(self, obj):
+        return get_face_scan_3(obj, self.context)
+
+    def get_face_scan_4(self, obj):
+        return get_face_scan_4(obj, self.context)
+
+    def get_face_scan_5(self, obj):
+        return get_face_scan_5(obj, self.context)
+
+    def get_id_card_front(self, obj):
+        return get_id_card_front(obj, self.context)
+
+    def get_id_card_back(self, obj):
+        return get_id_card_back(obj, self.context)
+
+    def get_profile_image_url(self, obj):
+        return get_profile_image_url(obj, self.context)
+
+    def get_profile_image(self, obj):
+        # Keep backwards compatibility: some frontends use `profile_image` key
+        return get_profile_image_url(obj, self.context)
+
+    def get_id_card_image(self, obj):
+        return get_id_card_image(obj, self.context)
 
     # ── Create ────────────────────────────────────────────────────────────────
 
@@ -209,3 +273,127 @@ def _save_biometrics(bio, b64_fields):
     for b64_key, field_name in mapping:
         if field_name and b64_fields.get(b64_key):
             save_base64_image(b64_fields[b64_key], f'{field_name}.jpg', getattr(bio, field_name))
+
+
+def _get_bio(obj, context=None):
+    from recognition.models import BiometricData
+    from django.contrib.contenttypes.models import ContentType
+    ct = ContentType.objects.get_for_model(obj)
+    bio = BiometricData.objects.filter(content_type=ct, object_id=obj.id).first()
+    # If this admin is linked to a StaffProfile and the admin biometric either
+    # doesn't exist or contains no image files, fall back to the linked
+    # staff's biometric so images remain visible.
+    def _has_images(b):
+        if not b:
+            return False
+        for f in ('face_front','face_left','face_right','face_down','face_unusual','id_card_front','id_card_back'):
+            try:
+                if getattr(b, f) and getattr(getattr(b, f), 'name', None):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    try:
+        if (bio is None or not _has_images(bio)) and hasattr(obj, 'linked_staff') and obj.linked_staff:
+            staff = obj.linked_staff
+            ct2 = ContentType.objects.get_for_model(staff)
+            bio2 = BiometricData.objects.filter(content_type=ct2, object_id=staff.id).first()
+            if _has_images(bio2):
+                bio = bio2
+    except Exception:
+        pass
+
+    return bio
+
+
+def _url_for(request, field):
+    if not field:
+        return None
+    try:
+        if request:
+            return request.build_absolute_uri(field.url)
+        # No request (internal calls) — return the relative/media URL
+        return field.url
+    except Exception:
+        return None
+
+
+def get_face_front(obj, context=None):
+    bio = _get_bio(obj)
+    return _url_for(context.get('request') if context else None, getattr(bio, 'face_front', None))
+
+
+def get_face_left(obj, context=None):
+    bio = _get_bio(obj)
+    return _url_for(context.get('request') if context else None, getattr(bio, 'face_left', None))
+
+
+def get_face_right(obj, context=None):
+    bio = _get_bio(obj)
+    return _url_for(context.get('request') if context else None, getattr(bio, 'face_right', None))
+
+
+def get_face_down(obj, context=None):
+    bio = _get_bio(obj)
+    return _url_for(context.get('request') if context else None, getattr(bio, 'face_down', None))
+
+
+def get_face_unusual(obj, context=None):
+    bio = _get_bio(obj)
+    return _url_for(context.get('request') if context else None, getattr(bio, 'face_unusual', None))
+
+
+def get_face_scan_1(obj, context=None):
+    return get_face_front(obj, context)
+
+
+def get_face_scan_2(obj, context=None):
+    return get_face_left(obj, context)
+
+
+def get_face_scan_3(obj, context=None):
+    return get_face_right(obj, context)
+
+
+def get_face_scan_4(obj, context=None):
+    return get_face_down(obj, context)
+
+
+def get_face_scan_5(obj, context=None):
+    return get_face_unusual(obj, context)
+
+
+def get_id_card_front(obj, context=None):
+    bio = _get_bio(obj)
+    return _url_for(context.get('request') if context else None, getattr(bio, 'id_card_front', None))
+
+
+def get_id_card_back(obj, context=None):
+    bio = _get_bio(obj)
+    return _url_for(context.get('request') if context else None, getattr(bio, 'id_card_back', None))
+
+
+def get_profile_image_url(obj, context=None):
+    try:
+        # Prefer AdminProfile.profile_image, fall back to linked StaffProfile.profile_image
+        req = context.get('request') if context else None
+        if obj.profile_image:
+            return req.build_absolute_uri(obj.profile_image.url) if req else (obj.profile_image.url if obj.profile_image else None)
+        try:
+            if hasattr(obj, 'linked_staff') and obj.linked_staff and obj.linked_staff.profile_image:
+                return req.build_absolute_uri(obj.linked_staff.profile_image.url) if req else obj.linked_staff.profile_image.url
+        except Exception:
+            pass
+        return None
+    except Exception:
+        return None
+
+
+def get_id_card_image(obj, context=None):
+    try:
+        if obj.id_card_image:
+            req = context.get('request') if context else None
+            return req.build_absolute_uri(obj.id_card_image.url) if req else (obj.id_card_image.url if obj.id_card_image else None)
+    except Exception:
+        return None

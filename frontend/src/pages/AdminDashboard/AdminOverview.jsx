@@ -8,6 +8,7 @@ import StatCard from '../../components/StatCard'
 import LiveCameraFeed from '../../components/guard/LiveCameraFeed'
 import { staffAPI, guardsAPI, visitorsAPI, camerasAPI, logsAPI, adminsAPI } from '../../services/api'
 import { useLang } from '../../context/LanguageContext'
+import { formatEthiopianTimeOnly } from '../../utils/ethiopianTime'
 import { useNavigate } from 'react-router-dom'
 import wsManager from '../../services/websocket'
 
@@ -52,7 +53,7 @@ export default function AdminOverview() {
         _id:Date.now(), action_type:data.type.toUpperCase(),
         description:data.visitor_name||data.message||data.type,
         actor_name:data.guard||data.name||'System',
-        ethiopian_time:new Date().toLocaleTimeString(),
+        ethiopian_time: formatEthiopianTimeOnly(new Date()),
       },...prev].slice(0,40))
       if (feedRef.current) feedRef.current.scrollTop=0
     })

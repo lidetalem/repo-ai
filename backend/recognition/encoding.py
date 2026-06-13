@@ -92,8 +92,22 @@ def _build_entry(obj, model_name, np_encodings, display_role=None, role_key=None
             pass
 
     valid_until = None
+    expiry_datetime = None
     if model_name == 'visitor':
-        raw = getattr(obj, 'valid_until', None) or getattr(obj, 'visit_date', None)
+        # Support multiple visitor expiry fields: prefer explicit `expiry_datetime`,
+        # fall back to `date_of_expiry` or legacy `valid_until`/`visit_date`.
+        raw = None
+        # Full datetime expiry on the model
+        raw_dt = getattr(obj, 'expiry_datetime', None)
+        if raw_dt:
+            expiry_datetime = raw_dt.isoformat() if hasattr(raw_dt, 'isoformat') else str(raw_dt)
+        else:
+            expiry_datetime = None
+        # Legacy date-only expiry
+        if getattr(obj, 'date_of_expiry', None):
+            raw = getattr(obj, 'date_of_expiry')
+        else:
+            raw = getattr(obj, 'valid_until', None) or getattr(obj, 'visit_date', None)
         if raw:
             valid_until = raw.isoformat() if hasattr(raw, 'isoformat') else str(raw)
 
@@ -113,6 +127,8 @@ def _build_entry(obj, model_name, np_encodings, display_role=None, role_key=None
         'department':     getattr(obj, 'department', '') or '',
         'profile_image':  profile_image,
         'valid_until':    valid_until,
+        'expiry_datetime': expiry_datetime,
+        'is_approved':    bool(getattr(obj, 'is_approved', True)) if model_name == 'visitor' else True,
         'gate':           getattr(obj, 'gate_registered_on', '') or '',
         'encodings':      np_encodings,
         'encoding_count': len(np_encodings),

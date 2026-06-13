@@ -33,10 +33,12 @@ import { toast } from 'react-hot-toast'
 import { recognitionAPI } from '../../services/api'
 import CompactIDOverlay from './CompactIDOverlay'
 import DigitalIDCard    from './DigitalIDCard'
+import audioManager from '../../utils/audioManager'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const SCAN_MS = 1200   // ms between backend POSTs — fast enough without hammering
 const CARD_MS = 9000   // ms an ID card stays visible
+const PER_PERSON_COOLDOWN_MS = 10000 // default client-side cooldown for recognized persons
 
 const BOX = {
   ACCEPTED:        '#00e676',
@@ -151,6 +153,17 @@ export default function LiveCameraFeed({
   const scanningRef = useRef(false)  // prevent overlapping requests
   const rafRef      = useRef(null)
   const lastFaces   = useRef([])     // latest faces from backend
+  const stickyFaces  = useRef(new Map()) // persistent locked faces to draw for TTL
+  const announceQueue = useRef([])
+  const announceRunning = useRef(false)
+  const announcePlayingKey = useRef(null)
+
+  // ── Per-person attempt limiting ───────────────────────────────────────────
+  // Key: face token (bbox fingerprint). Value: { attempts, blockedUntil }
+  const attemptMap  = useRef(new Map())
+  // processedMap tracks recognized/expired people cooldowns (not shown as 'too many attempts')
+  const processedMap = useRef(new Map())
+  const [blockCountdowns, setBlockCountdowns] = useState({}) // { faceKey: secondsLeft }
 
   const [running,     setRunning]     = useState(false)
   const [isMax,       setIsMax]       = useState(fullScreen)
@@ -168,11 +181,58 @@ export default function LiveCameraFeed({
     return () => clearInterval(iv)
   }, [])
 
+  // ── Block countdown ticker ─────────────────────────────────────────────────
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const now = Date.now()
+      const updated = {}
+      let changed = false
+      // Only show countdowns for unknown-face attemptMap entries
+      attemptMap.current.forEach((state, key) => {
+        if (state?.type !== 'unknown') return
+        if (state.blockedUntil && state.blockedUntil > now) {
+          updated[key] = Math.ceil((state.blockedUntil - now) / 1000)
+          changed = true
+        } else if (state.blockedUntil && state.blockedUntil <= now) {
+          // unblock unknown entry
+          state.blockedUntil = null
+          state.attempts = 0
+          changed = true
+        }
+      })
+      // expire sticky faces
+      stickyFaces.current.forEach((v, k) => {
+        if (v.expiresAt && v.expiresAt <= now) {
+          stickyFaces.current.delete(k)
+          changed = true
+        }
+      })
+      if (changed) setBlockCountdowns({ ...updated })
+      else if (Object.keys(blockCountdowns).length > 0) setBlockCountdowns({})
+    }, 500)
+    return () => clearInterval(iv)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Draw loop — requestAnimationFrame, zero network ───────────────────────
   useEffect(() => {
     if (!running) return
     const loop = () => {
-      drawBoxes(overlayRef.current, videoRef.current, lastFaces.current)
+      // merge live faces with active sticky faces so locked persons remain visible
+      const now = Date.now()
+      const merged = [...lastFaces.current]
+      stickyFaces.current.forEach((s, k) => {
+        if (!s || (s.expiresAt && s.expiresAt <= now)) return
+        // avoid duplicate if same digital_id or very similar bbox exists
+        const exists = merged.some(f => (
+          (s.digital_id && f.digital_id && f.digital_id === s.digital_id) ||
+          (s.person_key && f.person_key && f.person_key === s.person_key) ||
+          (f.box && Math.abs(f.box.left - s.box.left) < 2 && Math.abs(f.box.top - s.box.top) < 2)
+        ))
+        if (!exists) {
+          merged.push({ box: s.box, result: s.result, name: s.name, digital_id: s.digital_id, confidence: s.confidence })
+        }
+      })
+      drawBoxes(overlayRef.current, videoRef.current, merged)
       rafRef.current = requestAnimationFrame(loop)
     }
     rafRef.current = requestAnimationFrame(loop)
@@ -180,25 +240,11 @@ export default function LiveCameraFeed({
   }, [running])
 
   useEffect(() => {
-    if (!synthRef.current) return
-    const loadVoices = () => synthRef.current.getVoices()
-    loadVoices()
-    synthRef.current.onvoiceschanged = loadVoices
-    return () => { if (synthRef.current) synthRef.current.onvoiceschanged = null }
+    // audioManager handles voices and queued playback centrally
   }, [])
 
-  // ── Audio helpers ─────────────────────────────────────────────────────────
-
-  const speak = useCallback((text, lang = 'en-US') => {
-    try {
-      synthRef.current?.cancel()
-      const utterance = new SpeechSynthesisUtterance(text)
-      utterance.rate = 1.1
-      utterance.lang = lang
-      synthRef.current?.speak(utterance)
-    } catch {}
-  }, [])
-
+  // Use centralized queued audio manager to avoid overlapping sounds.
+  const speak = useCallback((text, lang = 'en-US') => audioManager.speakWeb(text, lang), [])
   const getEthiopianTime = useCallback(() => {
     const now = new Date()
     const utcMs = now.getTime() + now.getTimezoneOffset() * 60000
@@ -214,7 +260,7 @@ export default function LiveCameraFeed({
 
   const getWelcomeMessage = useCallback((firstName) => {
     const timeCall = getTimeCall()
-    return `እንኳን ወደ AMECO በደህና መጡ${firstName ? `, ${firstName}` : ''}, መልካም ${timeCall} ይሁንልዎ።`
+    return `እንኳን ወደ አሚኮ በደህና መጡ${firstName ? `, ${firstName}` : ''}, መልካም ${timeCall} ይሁንልዎ።`
   }, [getTimeCall])
 
   const getLockoutMessage = useCallback((seconds) => {
@@ -222,44 +268,72 @@ export default function LiveCameraFeed({
     return `በተደጋጋሚ ማንነትዎ ስላልታወቀ እባክዎ ለ ${timeText} ሰከንዶች ይጠብቁ እና ከዚያ በኋላ ዳግም ይሞክሩ።`
   }, [])
 
-  const speakAmharic = useCallback(async (text) => {
-    try {
-      const response = await fetch(`/api/tts/?text=${encodeURIComponent(text)}`)
-      if (!response.ok) {
-        throw new Error(`TTS request failed: ${response.status}`)
-      }
-      const blob = await response.blob()
-      const audioUrl = URL.createObjectURL(blob)
-      const audio = new Audio(audioUrl)
-      await audio.play()
-    } catch (err) {
-      console.error('TTS failed:', err)
+  const speakAmharic = useCallback((text) => audioManager.speakAmharic(text), [])
+  const beep = useCallback((ok = true) => audioManager.beep(ok), [])
+
+  // Announcement queue — ensures announcements correspond to currently-visible person
+  const _isFaceStillVisible = useCallback((personKey, bbox, digital_id) => {
+    const nowFaces = lastFaces.current || []
+    // Prefer person_key match, then digital_id, then nearby bbox
+    if (personKey) {
+      if (nowFaces.some(f => f.person_key && f.person_key === personKey)) return true
     }
+    if (digital_id) {
+      if (nowFaces.some(f => f.digital_id && f.digital_id === digital_id)) return true
+    }
+    if (bbox) {
+      return nowFaces.some(f => f.box && Math.abs(f.box.left - bbox.left) < 4 && Math.abs(f.box.top - bbox.top) < 4)
+    }
+    return false
   }, [])
 
-  const beep = useCallback((ok = true) => {
-    try {
-      const ctx  = new (window.AudioContext || window.webkitAudioContext)()
-      const osc  = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.connect(gain); gain.connect(ctx.destination)
-      if (ok) {
-        osc.type = 'sine'
-        osc.frequency.setValueAtTime(880,  ctx.currentTime)
-        osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.15)
-        gain.gain.setValueAtTime(0.35, ctx.currentTime)
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5)
-        osc.start(); osc.stop(ctx.currentTime + 0.5)
-      } else {
-        osc.type = 'square'
-        osc.frequency.setValueAtTime(280, ctx.currentTime)
-        gain.gain.setValueAtTime(0.3,  ctx.currentTime)
-        gain.gain.setValueAtTime(0,    ctx.currentTime + 0.13)
-        gain.gain.setValueAtTime(0.3,  ctx.currentTime + 0.23)
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5)
-        osc.start(); osc.stop(ctx.currentTime + 0.5)
+  const enqueueAnnouncement = useCallback((opts) => {
+    // opts: { personKey, bbox, digital_id, buildMessage: ()=>string, ok }
+    announceQueue.current.push(opts)
+    if (announceRunning.current) return
+    announceRunning.current = true
+
+    ;(async function run() {
+      while (announceQueue.current.length) {
+        try {
+          // Collapse the queue to the most recent visible announcement
+          const q = announceQueue.current.slice()
+          // Find candidates that are still visible
+          const candidates = q.filter(it => _isFaceStillVisible(it.personKey, it.bbox, it.digital_id))
+          if (candidates.length === 0) {
+            // No visible candidates; drop the entire queue
+            announceQueue.current = []
+            break
+          }
+          const chosen = candidates[candidates.length - 1] // most recently enqueued visible
+          // Remove all queued items (they are stale) before playing chosen
+          announceQueue.current = []
+
+          // Mark currently-playing person so we can avoid starting stale follow-ups
+          announcePlayingKey.current = chosen.personKey || chosen.digital_id || null
+
+          // run onPlay UI actions (cards, flashes, logs) before audio so UI matches
+          try { chosen.onPlay && chosen.onPlay() } catch (e) { console.warn('onPlay error', e) }
+
+          if (chosen.buildMessage) {
+            const msg = chosen.buildMessage()
+            await audioManager.beepThenSpeak(chosen.ok !== false, msg)
+          }
+
+          // Finished speaking for this person
+          announcePlayingKey.current = null
+        } catch (e) {
+          console.warn('Announce error', e)
+        }
       }
-    } catch {}
+      announceRunning.current = false
+    })()
+  }, [ _isFaceStillVisible ])
+
+  const clearAnnouncements = useCallback(() => {
+    announceQueue.current = []
+    announceRunning.current = false
+    audioManager.cancelAll()
   }, [])
 
   // ── Push a card onto the stack (de-duplicates by digital_id) ─────────────
@@ -297,84 +371,180 @@ export default function LiveCameraFeed({
 
       // Multi-face data comes in data.faces[]
       const faces = data.faces || []
-      lastFaces.current = faces
+
+      // ── Per-face attempt gating ──────────────────────────────────────────
+      // Build a stable face key using backend `person_key` when available,
+      // otherwise fall back to digital_id, then a more robust bbox fingerprint
+      // (center + size rounded) and reuse sticky face keys when nearby.
+      const keyedFaces = faces.map(f => {
+        const b = f.box
+        let faceKey = null
+        if (f.person_key) faceKey = f.person_key
+        else if (f.digital_id) faceKey = f.digital_id
+        else if (b) {
+          // center and average size, round to 5px grid to tolerate small shifts
+          const cx = Math.round(((b.left + b.right) / 2) / 5) * 5
+          const cy = Math.round(((b.top  + b.bottom) / 2) / 5) * 5
+          const sz = Math.round((((b.right - b.left) + (b.bottom - b.top)) / 2) / 5) * 5
+          faceKey = `bbox_${cx}_${cy}_${sz}`
+          // If there's an active sticky face close to this bbox, reuse its key
+          try {
+            for (const [k, v] of stickyFaces.current) {
+              if (!v || !v.box) continue
+              const dx = Math.abs((v.box.left + v.box.right) / 2 - (b.left + b.right) / 2)
+              const dy = Math.abs((v.box.top  + v.box.bottom) / 2 - (b.top  + b.bottom) / 2)
+              if (dx < 6 && dy < 6) { faceKey = k; break }
+            }
+          } catch (e) { /* ignore sticky lookup failures */ }
+        } else {
+          faceKey = `nobox_${f.name || 'unknown'}`
+        }
+        return { ...f, _faceKey: faceKey }
+      })
+
+      const now = Date.now()
+      const BLOCK_MS = 15000
+
+      // Filter: skip faces that are currently blocked (either unknown attemptMap
+      // or processedMap for recognized/expired cooldowns)
+      const gatedFaces = keyedFaces.filter(f => {
+        const astate = attemptMap.current.get(f._faceKey)
+        if (astate?.blockedUntil && astate.blockedUntil > now) return false
+        const pstate = processedMap.current.get(f._faceKey)
+        if (pstate?.blockedUntil && pstate.blockedUntil > now) return false
+        return true
+      })
+
+      // Update attempt counters for UNKNOWN faces that passed the gate
+      gatedFaces.forEach(f => {
+        if (f.result === 'UNKNOWN') {
+          const state = attemptMap.current.get(f._faceKey) || { attempts: 0, blockedUntil: null }
+          state.attempts = (state.attempts || 0) + 1
+          if (state.attempts >= 3) {
+            state.blockedUntil = now + BLOCK_MS
+            state.attempts = 0
+            // Show countdown overlay
+            setBlockCountdowns(prev => ({ ...prev, [f._faceKey]: 15 }))
+            enqueueAnnouncement({ personKey: f.person_key || f._faceKey, bbox: f.box, digital_id: f.digital_id, buildMessage: () => getLockoutMessage(15), ok: false })
+          }
+          state.type = 'unknown'
+          attemptMap.current.set(f._faceKey, state)
+        } else if (f.result === 'ACCEPTED') {
+          // Successful recognition: clear any unknown attempts and record a
+          // processed cooldown in processedMap (do NOT show "too many attempts").
+          attemptMap.current.delete(f._faceKey)
+          try {
+            setBlockCountdowns(prev => { const np = { ...prev }; delete np[f._faceKey]; return np })
+          } catch (e) {}
+          const lockMs = f.lock_ttl ? Math.round(Number(f.lock_ttl) * 1000) : PER_PERSON_COOLDOWN_MS
+          processedMap.current.set(f._faceKey, { blockedUntil: now + lockMs, type: 'processed' })
+        }
+      })
+
+      lastFaces.current = keyedFaces   // show ALL faces (including blocked — drawn in red)
       setFaceCount(faces.length)
 
-      const accepted = faces.filter(f => f.result === 'ACCEPTED')
-      const unknowns = faces.filter(f => f.result === 'UNKNOWN')
-      const expired  = faces.filter(f => f.result === 'VISITOR_EXPIRED')
+      const accepted = gatedFaces.filter(f => f.result === 'ACCEPTED')
+      const unknowns = gatedFaces.filter(f => f.result === 'UNKNOWN')
+      const expired  = gatedFaces.filter(f => f.result === 'VISITOR_EXPIRED')
 
-      // Handle no-faces-in-array case (older backend compat — use top-level result)
-      if (faces.length === 0 && data.result === 'ACCEPTED') {
-        // Single-person fallback: synthesise a faces array from top-level data
-        const synth = [{ ...data, box: { top: 10, left: 10, right: 90, bottom: 90 } }]
-        lastFaces.current = synth
-        setFaceCount(1)
-        accepted.push(data)
+      // If no faces were returned, clear any pending announcements and skip
+      if (faces.length === 0) {
+        lastFaces.current = []
+        setFaceCount(0)
+        // cancel pending audio — nothing to announce when no person present
+        clearAnnouncements()
+        return
       }
 
       if (accepted.length > 0) {
-        beep(true)
-        const firstName = accepted[0].name?.split(' ')[0] || ''
-        if (accepted.length === 1) {
-          speakAmharic(getWelcomeMessage(firstName))
-        } else {
-          speakAmharic('እንኳን ወደ AMECO በደህና መጡ. የተገኙ ሰዎችን እናስተናግዳለን።')
-        }
-        setFlash('ok')
-        setTimeout(() => setFlash(null), CARD_MS)
+        // Only play audio / show cards for faces that are not backend-ignored
+        const playable = accepted.filter(f => !f.ignored)
+        if (playable.length > 0) {
+          // enqueue audio via our announcer — it will verify the person is
+          // still visible when the audio begins to avoid stale announcements.
+          const first = playable[0]
+          const firstName = first.name?.split(' ')[0] || ''
+          const message = playable.length === 1
+            ? getWelcomeMessage(firstName)
+            : 'እንኳን ወደ አሚኮ በደህና መጡ. የተገኙ ሰዎችን እናስተናግዳለን።'
+          // prepare UI actions to run only when announcement actually plays
+          const onPlay = () => {
+            setFlash('ok')
+            setTimeout(() => setFlash(null), CARD_MS)
+            for (const f of playable) {
+              pushCard({
+                access_granted: true,
+                name:           f.name,
+                digital_id:     f.digital_id,
+                role:           f.role,
+                display_role:   f.display_role,
+                position:       f.position,
+                department:     f.department,
+                phone:          f.phone,
+                profile_image:  f.profile_image,
+                valid_until:    f.valid_until,
+                confidence:     f.confidence,
+                gate:           f.gate,
+              })
+              onLog?.({ event: 'IN', userId: f.digital_id, name: f.name })
+            }
+          }
 
-        for (const f of accepted) {
-          pushCard({
-            access_granted: true,
-            name:           f.name,
-            digital_id:     f.digital_id,
-            role:           f.role,
-            display_role:   f.display_role,
-            position:       f.position,
-            department:     f.department,
-            phone:          f.phone,
-            profile_image:  f.profile_image,
-            valid_until:    f.valid_until,
-            confidence:     f.confidence,
-            gate:           f.gate,
-          })
-          onLog?.({ event: 'IN', userId: f.digital_id, name: f.name })
+          enqueueAnnouncement({ personKey: first.person_key || first._faceKey, bbox: first.box, digital_id: first.digital_id, buildMessage: () => message, ok: true, onPlay })
         }
       }
 
       if (expired.length > 0) {
-        beep(false)
-        speakAmharic('የጊዜ ገደቡ አልቋል።')
-        expired.forEach(f =>
-          toast(`⏰ ${f.name} — access EXPIRED`, {
-            icon: '🚫',
-            style: { background: '#1a1000', color: '#ffab00', border: '1px solid #ffab00' },
-            duration: 5000,
+        const playableExpired = expired.filter(f => !f.ignored)
+        if (playableExpired.length > 0) {
+          const first = playableExpired[0]
+          const onPlayExpired = () => {
+            playableExpired.forEach(f =>
+              toast(`⏰ ${f.name} — access EXPIRED`, {
+                icon: '🚫',
+                style: { background: '#1a1000', color: '#ffab00', border: '1px solid #ffab00' },
+                duration: 5000,
+              })
+            )
+          }
+          enqueueAnnouncement({ personKey: first.person_key || first._faceKey, bbox: first.box, digital_id: first.digital_id, buildMessage: () => 'የጊዜ ገደቡ አልቋል።', ok: false, onPlay: onPlayExpired })
+          // apply cooldown for expired faces to avoid repeated announcements
+          // Use processedMap so expired (recognized) faces do not show "too many attempts"
+          playableExpired.forEach(f => {
+            const lockMs = f.lock_ttl ? Math.round(Number(f.lock_ttl) * 1000) : PER_PERSON_COOLDOWN_MS
+            processedMap.current.set(f._faceKey, { blockedUntil: Date.now() + lockMs, type: 'processed' })
           })
-        )
+        }
+        // Show toast for expired faces when the announcement actually plays
+        // (handled in the onPlay callback below)
       }
 
       if (unknowns.length > 0 && accepted.length === 0) {
-        beep(false)
-        speakAmharic('የማይታወቅ ሰው።')
-        toast.error(`⚠️ ${unknowns.length} unknown face${unknowns.length > 1 ? 's' : ''} detected`, {
-          style: { background: '#110000', color: '#fff', border: '1px solid #ff1744' },
-          duration: 3000,
-        })
-        onAlert?.({ kind: 'UNAUTHORIZED', reason: `${unknowns.length} unknown face(s) at ${assignedGateId}` })
-        setFlash('deny')
-        setTimeout(() => setFlash(null), 2500)
+        const playableUnknowns = unknowns.filter(f => !f.ignored)
+        if (playableUnknowns.length > 0) {
+          const first = playableUnknowns[0]
+          const onPlayUnknowns = () => {
+            toast.error(`⚠️ ${unknowns.length} unknown face${unknowns.length > 1 ? 's' : ''} detected`, {
+              style: { background: '#110000', color: '#fff', border: '1px solid #ff1744' },
+              duration: 3000,
+            })
+            onAlert?.({ kind: 'UNAUTHORIZED', reason: `${unknowns.length} unknown face(s) at ${assignedGateId}` })
+            setFlash('deny')
+            setTimeout(() => setFlash(null), 2500)
+          }
+          enqueueAnnouncement({ personKey: first.person_key || first._faceKey, bbox: first.box, digital_id: first.digital_id, buildMessage: () => 'የማይታወቅ ሰው።', ok: false, onPlay: onPlayUnknowns })
+        }
+        // Instead of immediate UI updates, run them when the announcement plays
       }
 
       // Backward-compat: single-result REJECTED from older endpoint
       if (faces.length === 0 && data.result === 'REJECTED') {
-        beep(false)
         const attLeft = data.attempts_left ?? 0
         if (attLeft === 0) {
-          speakAmharic(getLockoutMessage(data.seconds_remaining ?? 0))
+          enqueueAnnouncement({ buildMessage: () => getLockoutMessage(data.seconds_remaining ?? 0), ok: false })
         } else {
-          speakAmharic('የማይታወቅ ሰው።')
+          enqueueAnnouncement({ buildMessage: () => 'የማይታወቅ ሰው።', ok: false })
         }
         toast.error(`⚠️ Unknown face — ${attLeft} attempt(s) remaining`, {
           style: { background: '#110000', color: '#fff', border: '1px solid #ff1744' },
@@ -434,12 +604,15 @@ export default function LiveCameraFeed({
       const ctx = overlayRef.current.getContext('2d')
       ctx.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height)
     }
+    // clear queued announcements and currently-playing audio
+    try { clearAnnouncements() } catch {}
     setRunning(false); setCards([]); setIdCard(null); setFlash(null); setFaceCount(0)
     onStatusChange?.(false)
     toast('Camera stopped.', { icon: '⏹️' })
   }
 
   useEffect(() => () => streamRef.current?.getTracks().forEach(t => t.stop()), [])
+  useEffect(() => () => { try { clearAnnouncements() } catch {} }, [])
 
   // Border reflects last result
   const borderCol =
@@ -564,7 +737,7 @@ export default function LiveCameraFeed({
                         <motion.div
                           animate={{ y: ['0%', '100%', '0%'] }}
                           transition={{ duration: 2.4, repeat: Infinity, ease: 'linear' }}
-                          className="h-[2px] rounded-full w-full"
+                          className="h-0.5 rounded-full w-full"
                           style={{
                             background: scanning
                               ? 'linear-gradient(90deg,transparent,#2979ff,transparent)'
@@ -631,6 +804,24 @@ export default function LiveCameraFeed({
                         </div>
                       </motion.div>
                     )}
+                  </AnimatePresence>
+
+                  {/* Per-person block countdowns */}
+                  <AnimatePresence>
+                    {Object.entries(blockCountdowns).map(([key, secs]) => secs > 0 && (
+                      <motion.div key={key}
+                                  initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
+                                  className="absolute bottom-12 left-1/2 -translate-x-1/2 pointer-events-none">
+                        <div className="flex flex-col items-center gap-1 px-5 py-3 rounded-2xl"
+                             style={{ background: 'rgba(20,0,0,0.92)', border: '1px solid #ff1744', backdropFilter: 'blur(8px)' }}>
+                          <p className="text-[10px] font-black uppercase tracking-wider" style={{ color: '#ff1744' }}>
+                            Too many failed attempts
+                          </p>
+                          <p className="text-2xl font-black text-white">{secs}s</p>
+                          <p className="text-[9px]" style={{ color: '#ff6666' }}>Please wait before retrying</p>
+                        </div>
+                      </motion.div>
+                    ))}
                   </AnimatePresence>
                 </>
               )}

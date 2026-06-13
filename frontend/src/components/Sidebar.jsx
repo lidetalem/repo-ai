@@ -2,13 +2,13 @@ import React, { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Users, Shield, UserCheck, Camera,
-  FileText, Bell, Settings, LogOut, ChevronLeft, ChevronRight,
+  FileText, Settings, LogOut, ChevronLeft, ChevronRight,
   UserCog, User2,
 } from 'lucide-react'
 import logo from '../assets/logo.png'
 import { useAuth } from '../context/AuthContext'
 import { useLang } from '../context/LanguageContext'
-import { useNotifications } from '../context/NotificationContext'
+/* notifications removed */
 
 const BASE_URL = 'http://127.0.0.1:8000'
 const getImageUrl = (url) => {
@@ -25,7 +25,6 @@ const ADMIN_NAV = [
   { key: 'visitors',     label: 'visitors',     icon: UserCheck,       path: '/admin/visitors' },
   { key: 'cameras',      label: 'cameras',      icon: Camera,          path: '/admin/cameras' },
   { key: 'logs',         label: 'logs',         icon: FileText,        path: '/admin/logs' },
-  { key: 'notifications',label: 'notifications',icon: Bell,            path: '/admin/notifications' },
   { key: 'settings',     label: 'settings',     icon: Settings,        path: '/admin/settings' },
 ]
 
@@ -33,14 +32,12 @@ const GUARD_NAV = [
   { key: 'dashboard',    label: 'dashboard',    icon: LayoutDashboard, path: '/guard' },
   { key: 'visitors',     label: 'visitors',     icon: UserCheck,       path: '/guard/visitors' },
   { key: 'requests',     label: 'request',      icon: User2,           path: '/guard/requests' },
-  { key: 'notifications',label: 'notifications',icon: Bell,            path: '/guard/notifications' },
   { key: 'settings',     label: 'settings',     icon: Settings,        path: '/guard/settings' },
 ]
 
 export default function Sidebar({ role }) {
   const { user, logout }     = useAuth()
   const { t }                = useLang()
-  const { unreadCount }      = useNotifications()
   const navigate             = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
 
@@ -91,13 +88,7 @@ export default function Sidebar({ role }) {
             })}>
             <Icon size={18} className="flex-shrink-0" />
             {!collapsed && <span className="truncate">{t(label)}</span>}
-            {key === 'notifications' && unreadCount > 0 && (
-              <span
-                className="ml-auto text-xs font-bold px-1.5 py-0.5 rounded-full"
-                style={{ background: '#cc0000', color: 'white', minWidth: '20px', textAlign: 'center' }}>
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </span>
-            )}
+            {/* notification badge removed */}
           </NavLink>
         ))}
       </nav>

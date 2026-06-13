@@ -1,18 +1,19 @@
-import { useState, useEffect } from 'react';
-import { formatEthiopianDateTime } from '../utils/ethiopianTime';
-import { useLanguage } from '../context/LanguageContext';
+import { useState, useEffect } from 'react'
+import { formatEthiopianDateTime } from '../utils/ethiopianTime'
+import { useLang } from '../context/LanguageContext'
 
-export const useEthiopianTime = () => {
-  const { language } = useLanguage();
-  const [currentTime, setCurrentTime] = useState(formatEthiopianDateTime(new Date(), language));
+export function useEthiopianTime() {
+  const { lang } = useLang()
+  const [currentTime, setCurrentTime] = useState(() => formatEthiopianDateTime(new Date(), lang))
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(formatEthiopianDateTime(new Date(), language));
-    }, 1000);
+    const iv = setInterval(() => setCurrentTime(formatEthiopianDateTime(new Date(), lang)), 1000)
+    return () => clearInterval(iv)
+  }, [lang])
 
-    return () => clearInterval(timer);
-  }, [language]);
+  return currentTime
+}
 
-  return currentTime;
-};
+// Legacy default export for backward compat
+export const useEthiopianTimeLegacy = useEthiopianTime
+export default useEthiopianTime

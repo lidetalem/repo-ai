@@ -4,7 +4,8 @@ import toast from 'react-hot-toast'
 import DataTable from '../../components/DataTable'
 import Modal from '../../components/Modal'
 import RegistrationForm from '../../components/RegistrationForm'
-import { staffAPI } from '../../services/api'
+import { staffAPI, BASE_URL } from '../../services/api'
+import PersonDetailModal from '../../components/PersonDetailModal'
 import ImportStaffModal from '../../components/ImportStaffModal'
 import { useLang } from '../../context/LanguageContext'
 
@@ -32,23 +33,26 @@ export default function StaffPage() {
     setSaving(true)
     try {
       if (selected) {
-        const res = await staffAPI.update(selected.id, form)
-        const updated = res.data || res
-        if (JSON.stringify(updated) === JSON.stringify(selected)) {
-          toast('No Changes Detected')
-        } else {
-          toast.success('Saved Successfully')
-        }
+        await staffAPI.update(selected.id, form)
+        toast.success('Staff record updated successfully')
       } else {
         await staffAPI.create({ ...form, registered_by: 'admin' })
-        toast.success('Saved Successfully')
+        toast.success('Staff member registered successfully')
       }
       setSelected(null)
       setShowForm(false)
       load()
     } catch (err) {
-      const msg = err.response?.data?.detail || Object.values(err.response?.data || {}).flat().join('\n') || 'Save failed'
-      toast.error(msg)
+      const data = err.response?.data
+      if (data && typeof data === 'object') {
+        const msg = data.detail || Object.entries(data)
+          .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
+          .join(' | ')
+        toast.error(msg || 'Save failed')
+      } else {
+        toast.error('Save failed — please check your connection and try again')
+      }
+      throw err  // re-throw so RegistrationForm can surface field errors
     } finally {
       setSaving(false)
     }
@@ -187,29 +191,14 @@ export default function StaffPage() {
         />
       </Modal>
 
-      {/* View Modal */}
-      <Modal open={!!viewItem} onClose={() => setViewItem(null)} title="Staff Details">
-        {viewItem && (
-          <div className="space-y-3 text-sm">
-            {[
-              ['Name', `${viewItem.first_name} ${viewItem.middle_name} ${viewItem.last_name}`],
-              ['Digital ID', viewItem.digital_id],
-              ['Position', viewItem.position],
-              ['Department', viewItem.department],
-              ['Phone', viewItem.phone_number],
-              ['Email', viewItem.email],
-              ['Gender', viewItem.gender],
-              ['Description', viewItem.description],
-              ['Registered At', viewItem.registered_at ? new Date(viewItem.registered_at).toLocaleString() : '—'],
-            ].map(([label, value]) => (
-              <div key={label} className="flex gap-3">
-                <span className="w-32 flex-shrink-0 font-semibold" style={{ color: 'var(--color-text-muted)' }}>{label}</span>
-                <span style={{ color: 'var(--color-text-main)' }}>{value || '—'}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </Modal>
+      {/* View Modal — enhanced */}
+      {viewItem && (
+        <PersonDetailModal
+          person={viewItem}
+          type="staff"
+          onClose={() => setViewItem(null)}
+        />
+      )}
 
       {showImport && (
         <ImportStaffModal

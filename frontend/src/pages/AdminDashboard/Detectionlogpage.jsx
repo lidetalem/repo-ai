@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import DataTable from '../../components/DataTable'
 import { logsAPI } from '../../services/api'
 import { useLang } from '../../context/LanguageContext'
+import { formatBackendDate } from '../../utils/ethiopianTime'
 
 // ─── Detection-only action types ──────────────────────────────────────────────
 const DETECTION_ACTIONS = ['SCAN_ACCEPTED', 'SCAN_REJECTED']
@@ -37,7 +38,7 @@ function StatCard({ icon: Icon, color, label, value }) {
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function DetectionLogPage() {
-  const { t } = useLang()
+  const { t, lang } = useLang()
 
   const [logs,         setLogs]         = useState([])
   const [loading,      setLoading]      = useState(true)
@@ -140,9 +141,9 @@ export default function DetectionLogPage() {
     {
       key: 'ethiopian_time',
       label: t('timestamp') || 'Date / Time (ET)',
-      render: (v) => (
+      render: (v, row) => (
         <span className="font-mono text-xs whitespace-nowrap" style={{ color: 'var(--color-text-muted)' }}>
-          {v}
+          {v || (row.timestamp ? formatBackendDate(row.timestamp, lang) : '—')}
         </span>
       ),
     },

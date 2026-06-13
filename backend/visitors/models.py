@@ -18,6 +18,9 @@ class Visitor(models.Model):
     gender              = models.CharField(max_length=1, choices=GENDER_CHOICES, default='M')
     date_of_first_entry = models.DateField(null=True, blank=True)
     date_of_expiry      = models.DateField(null=True, blank=True)
+    expiry_datetime     = models.DateTimeField(null=True, blank=True,
+                             help_text='Full date and time when this visitor expires. '
+                                       'Takes precedence over date_of_expiry when set.')
     description         = models.TextField(blank=True)   # reason for visit
     visitor_tag         = models.CharField(max_length=100, blank=True)
     digital_id          = models.CharField(max_length=50, unique=True, blank=True)
@@ -25,7 +28,10 @@ class Visitor(models.Model):
     gate_registered_on  = models.CharField(max_length=50, blank=True)
     registered_by       = models.CharField(max_length=255, blank=True)
     registered_at       = models.DateTimeField(auto_now_add=True)
-
+    
+    # Approval and lifecycle
+    is_approved         = models.BooleanField(default=False)
+    status              = models.CharField(max_length=20, default='Pending')
     # Legacy fields used by existing frontend
     reason              = models.TextField(blank=True)
     start_date          = models.DateField(null=True, blank=True)
@@ -56,6 +62,16 @@ class Visitor(models.Model):
         except Exception:
             pass
 
+    def is_expired(self):
+        from datetime import date
+        from django.utils import timezone
+        now = timezone.now()
+        if self.expiry_datetime:
+            return self.expiry_datetime < now
+        if self.date_of_expiry:
+            return self.date_of_expiry < date.today()
+        return False
+
 
 class VisitorRequest(models.Model):
     STATUS_CHOICES = [
@@ -66,6 +82,7 @@ class VisitorRequest(models.Model):
 
     temp_user       = models.ForeignKey(Visitor, on_delete=models.CASCADE, related_name='requests', null=True, blank=True)
     guard_username  = models.CharField(max_length=150, blank=True)
+    guard_image     = models.CharField(max_length=255, blank=True)
     status          = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')
     reason          = models.TextField(blank=True)
     start_date      = models.DateField(null=True, blank=True)

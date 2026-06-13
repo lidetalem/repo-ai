@@ -71,16 +71,37 @@ def _tolerance(entry):
     return BASE_TOLERANCE if entry.get('encoding_count', 0) >= 4 else RELAXED_TOLERANCE
 
 
-def _visitor_expired(entry):
+def _visitor_not_allowed(entry):
+    """Returns True if a VISITOR should be denied (unapproved OR expired)."""
     if entry.get('role') != 'VISITOR':
         return False
-    vu = entry.get('valid_until')
+    # Block if not yet approved by admin
+    if not entry.get('is_approved', True):
+        return True
+    # Block if expiry has passed (check both full datetime and legacy date)
+    # Prefer explicit expiry_datetime, fall back to valid_until.
+    vu = entry.get('expiry_datetime') or entry.get('valid_until')
     if not vu:
         return False
     try:
-        return date.fromisoformat(vu[:10]) < date.today()
+        from datetime import datetime, timezone as dt_tz
+        import re
+        # Try datetime first (has 'T' in it or a space)
+        if 'T' in vu or ' ' in vu:
+            # Parse ISO datetime
+            clean = re.sub(r'[+-]\d{2}:\d{2}$', '', vu.replace('Z', ''))
+            dt = datetime.fromisoformat(clean)
+            # Compare as UTC (naive dt compared to naive now)
+            import django.utils.timezone as dj_tz
+            return dj_tz.now().replace(tzinfo=None) > dt
+        else:
+            return date.fromisoformat(vu[:10]) < date.today()
     except Exception:
         return False
+
+# Keep old name as alias for any external callers
+def _visitor_expired(entry):
+    return _visitor_not_allowed(entry)
 
 
 def _match(enc, cache):

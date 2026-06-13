@@ -10,14 +10,16 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from authentication.permissions import CanViewLogs
+from authentication.permissions import CanViewLogs, guard_or_privilege
 from .models import AccessLog
 from .serializers import AccessLogSerializer
 
 
 class AccessLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class   = AccessLogSerializer
-    permission_classes = [CanViewLogs]
+    # Allow guards to view recent scan logs; admins still require the
+    # `view_logs` privilege. This uses the mixed guard-or-privilege helper.
+    permission_classes = [guard_or_privilege('view_logs')]
 
     def get_queryset(self):
         qs        = AccessLog.objects.all().order_by('-timestamp')

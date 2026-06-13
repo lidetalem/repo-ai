@@ -1,19 +1,15 @@
 import React from 'react'
-import { Bell, Sun, Moon } from 'lucide-react'
+import { Sun, Moon } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useTheme } from '../context/ThemeContext'
 import { useLang } from '../context/LanguageContext'
-import { useNotifications } from '../context/NotificationContext'
 import { useAuth } from '../context/AuthContext'
 
 export default function TopBar({ title }) {
   const { theme, toggle }    = useTheme()
   const { lang, switchLang } = useLang()
-  const { unreadCount }      = useNotifications()
   const { user }             = useAuth()
   const navigate             = useNavigate()
-
-  const notifPath = user?.role === 'admin' ? '/admin/notifications' : '/guard/notifications'
 
   return (
     <header
@@ -56,24 +52,7 @@ export default function TopBar({ title }) {
           {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
         </button>
 
-        {/* Notifications bell */}
-        <button
-          onClick={() => navigate(notifPath)}
-          className="relative w-9 h-9 flex items-center justify-center rounded-xl transition-all"
-          style={{
-            background: 'var(--color-card-main)',
-            border: '1px solid var(--color-border-main)',
-            color: 'var(--color-text-muted)',
-          }}>
-          <Bell size={16} />
-          {unreadCount > 0 && (
-            <span
-              className="absolute -top-1 -right-1 w-4 h-4 text-xs font-bold flex items-center justify-center rounded-full"
-              style={{ background: '#cc0000', color: 'white' }}>
-              {unreadCount > 9 ? '9+' : unreadCount}
-            </span>
-          )}
-        </button>
+        {/* notifications removed */}
       </div>
     </header>
   )

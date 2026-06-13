@@ -1,20 +1,28 @@
 /**
  * ImportStaffModal.jsx — AMECO External Staff Import
  *
- * Three-step wizard:
- *   Step 1 — Connection form  (DB engine, host, credentials, table, field map)
- *   Step 2 — Preview table    (shows fetched rows, admin selects which to import)
- *   Step 3 — Live import      (streaming progress bar, per-row status)
+ * Mode toggle at the top:
+ *   Online  — connects to a remote database (original three-step wizard)
+ *   Offline — accepts a CSV file with smart auto-detection of column names
+ *
+ * Offline CSV auto-detects common column name variants:
+ *   first_name / firstname / fname / given_name
+ *   last_name / lastname / lname / surname / family_name
+ *   phone / mobile / phone_number / contact
+ *   job_title / position / title / role
+ *   dept / department / division
+ *   email / email_address
+ *   gender / sex
  */
 
 import React, { useState, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Database, Link2, Download, CheckCircle2,
+  Database, Link2, Eye, Download, CheckCircle2,
   XCircle, AlertCircle, ChevronRight, ChevronLeft,
-  Loader2, X, RefreshCw, Check, Minus,
+  Loader2, X, RefreshCw, Check, Minus, Upload,
+  Wifi, WifiOff, FileText, Info,
 } from 'lucide-react'
-import PasswordInput from './PasswordInput'
 import toast from 'react-hot-toast'
 import { BASE_URL } from '../services/api'
 import { useAuth } from '../context/AuthContext'
@@ -51,12 +59,67 @@ const DEFAULT_MAP = Object.fromEntries(
   AMECO_FIELDS.map(f => [f.key, f.key.replace('_url', '').replace('phone_number', 'phone')])
 )
 
+// ── CSV auto-detection aliases ─────────────────────────────────────────────
+const CSV_ALIASES = {
+  first_name:   ['first_name', 'firstname', 'fname', 'given_name', 'givenname', 'first'],
+  middle_name:  ['middle_name', 'middlename', 'mname', 'middle'],
+  last_name:    ['last_name', 'lastname', 'lname', 'surname', 'family_name', 'familyname', 'last'],
+  email:        ['email', 'email_address', 'emailaddress', 'e_mail'],
+  phone_number: ['phone', 'phone_number', 'phonenumber', 'mobile', 'contact', 'cell', 'telephone'],
+  position:     ['position', 'job_title', 'jobtitle', 'title', 'role', 'job'],
+  department:   ['department', 'dept', 'division', 'team', 'group', 'unit'],
+  gender:       ['gender', 'sex'],
+  profile_image_url: ['profile_image', 'profile_image_url', 'photo', 'image', 'avatar', 'picture'],
+  face_front_url: ['face_front', 'face_front_url', 'face', 'headshot'],
+}
+
+function detectColumnMap(headers) {
+  const normalized = headers.map(h => h.toLowerCase().trim().replace(/\s+/g, '_'))
+  const map = {}
+  for (const [field, aliases] of Object.entries(CSV_ALIASES)) {
+    const match = normalized.find(h => aliases.includes(h))
+    if (match) {
+      map[field] = headers[normalized.indexOf(match)]
+    }
+  }
+  return map
+}
+
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim())
+  if (lines.length < 2) return { headers: [], rows: [] }
+  const parseRow = (line) => {
+    const result = []
+    let current = ''
+    let inQuotes = false
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]
+      if (ch === '"') {
+        inQuotes = !inQuotes
+      } else if (ch === ',' && !inQuotes) {
+        result.push(current.trim())
+        current = ''
+      } else {
+        current += ch
+      }
+    }
+    result.push(current.trim())
+    return result
+  }
+  const headers = parseRow(lines[0])
+  const rows = lines.slice(1).map(l => {
+    const vals = parseRow(l)
+    return Object.fromEntries(headers.map((h, i) => [h, vals[i] || '']))
+  })
+  return { headers, rows }
+}
+
 // ── Styles ────────────────────────────────────────────────────────────────────
 const inputCls = `
   w-full px-3 py-2 rounded-xl text-sm outline-none transition-all
   border border-[var(--color-border-main)]
   bg-[var(--color-card-bg)] text-[var(--color-text-main)]
-  focus:border-[#cc0000] focus:ring-1 focus:ring-[#cc000040]
+  focus:border-[#cc0000] focus:ring-1 focus:ring-[#cc000040)]
 `
 const labelCls = 'block text-xs font-semibold mb-1 text-[var(--color-text-muted)]'
 
@@ -70,11 +133,10 @@ function Field({ label, children }) {
 }
 
 // ── Step indicator ────────────────────────────────────────────────────────────
-function Steps({ current }) {
-  const steps = ['Connect', 'Preview', 'Import']
+function Steps({ current, labels }) {
   return (
     <div className="flex items-center gap-2 mb-6">
-      {steps.map((s, i) => (
+      {labels.map((s, i) => (
         <React.Fragment key={s}>
           <div className="flex items-center gap-2">
             <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black
@@ -88,7 +150,7 @@ function Steps({ current }) {
               {s}
             </span>
           </div>
-          {i < steps.length - 1 && (
+          {i < labels.length - 1 && (
             <div className="flex-1 h-px" style={{
               background: i < current ? '#22c55e' : 'var(--color-border-main)'
             }} />
@@ -102,9 +164,12 @@ function Steps({ current }) {
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ImportStaffModal({ onClose, onImportDone }) {
   const { user } = useAuth()
+
+  // ── Mode: 'online' | 'offline'
+  const [mode, setMode] = useState('online')
   const [step, setStep] = useState(0)
 
-  // Step 1 — connection
+  // ── Online: Step 0 — connection
   const [conn, setConn] = useState({
     engine: 'postgresql', host: '', port: '', database: '',
     username: '', password: '', ssl_mode: 'prefer',
@@ -114,20 +179,82 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
   const [showFieldMap, setShowFieldMap]  = useState(false)
   const [connecting,   setConnecting]    = useState(false)
 
-  // Step 2 — preview
+  // ── Shared: Step 1 — preview
   const [previewRows,  setPreviewRows]   = useState([])
   const [selected,     setSelected]      = useState(new Set())
   const [skipExisting, setSkipExisting]  = useState(true)
 
-  // Step 3 — import progress
+  // ── Shared: Step 2 — import progress
   const [importing,    setImporting]     = useState(false)
-  const [log,          setLog]           = useState([])   // [{status,message,name}]
+  const [log,          setLog]           = useState([])
   const [summary,      setSummary]       = useState(null)
   const logRef = useRef(null)
 
+  // ── Offline CSV state
+  const fileInputRef   = useRef(null)
+  const [csvHeaders,   setCsvHeaders]   = useState([])
+  const [csvRows,      setCsvRows]      = useState([])
+  const [csvColMap,    setCsvColMap]    = useState({})   // AMECO field → CSV column header
+  const [csvFileName,  setCsvFileName]  = useState('')
+  const [csvParsed,    setCsvParsed]    = useState(false)
+
   const setConnField = (k, v) => setConn(p => ({ ...p, [k]: v }))
 
-  // ── Step 1: fetch preview ──────────────────────────────────────────────────
+  // Reset when mode changes
+  const switchMode = (m) => {
+    setMode(m)
+    setStep(0)
+    setPreviewRows([])
+    setSelected(new Set())
+    setSummary(null)
+    setLog([])
+    setCsvParsed(false)
+    setCsvHeaders([])
+    setCsvRows([])
+    setCsvFileName('')
+  }
+
+  // ── Offline: handle CSV file ───────────────────────────────────────────────
+  const handleCSVFile = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setCsvFileName(file.name)
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const { headers, rows } = parseCSV(ev.target.result)
+      if (headers.length === 0) { toast.error('Could not parse CSV — check file format'); return }
+      setCsvHeaders(headers)
+      setCsvRows(rows)
+      const detected = detectColumnMap(headers)
+      setCsvColMap(detected)
+      setCsvParsed(true)
+      toast.success(`Loaded ${rows.length} rows from ${file.name}`)
+    }
+    reader.readAsText(file)
+  }
+
+  const buildOfflinePreview = () => {
+    if (!csvParsed) { toast.error('Please upload a CSV file first'); return }
+    if (!csvColMap.first_name) { toast.error('Could not auto-detect "first name" column — please map it manually'); return }
+    const rows = csvRows.map(r => ({
+      first_name:  r[csvColMap.first_name]  || '',
+      middle_name: r[csvColMap.middle_name] || '',
+      last_name:   r[csvColMap.last_name]   || '',
+      email:       r[csvColMap.email]       || '',
+      phone_number: r[csvColMap.phone_number] || '',
+      position:    r[csvColMap.position]    || '',
+      department:  r[csvColMap.department]  || '',
+      gender:      r[csvColMap.gender]      || '',
+      has_photo:   !!(r[csvColMap.profile_image_url]),
+      has_faces:   false,
+      _raw: r,
+    })).filter(r => r.first_name)
+    setPreviewRows(rows)
+    setSelected(new Set(rows.map((_, i) => i)))
+    setStep(1)
+  }
+
+  // ── Online: Step 1 — fetch preview ────────────────────────────────────────
   const fetchPreview = async () => {
     setConnecting(true)
     try {
@@ -142,7 +269,6 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Connection failed')
-
       setPreviewRows(data.rows || [])
       setSelected(new Set(data.rows.map((_, i) => i)))
       toast.success(data.message || `Found ${data.total} records`)
@@ -154,7 +280,7 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
     }
   }
 
-  // ── Step 2: toggle selection ───────────────────────────────────────────────
+  // ── Step 1: toggle selection ───────────────────────────────────────────────
   const toggleRow = (i) => setSelected(prev => {
     const s = new Set(prev)
     s.has(i) ? s.delete(i) : s.add(i)
@@ -167,13 +293,63 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
       : new Set(previewRows.map((_, i) => i))
   )
 
-  // ── Step 3: run import (streaming) ────────────────────────────────────────
+  // ── Step 2: run import (online streaming / offline direct) ────────────────
   const runImport = async () => {
     setImporting(true)
     setLog([])
     setSummary(null)
     setStep(2)
 
+    if (mode === 'offline') {
+      // Build payload from selected CSV rows
+      const rows = [...selected]
+        .sort((a, b) => a - b)
+        .map(i => previewRows[i])
+
+      let created = 0, skipped = 0, errors = 0
+      for (const row of rows) {
+        try {
+          const payload = {
+            first_name:   row.first_name,
+            middle_name:  row.middle_name,
+            last_name:    row.last_name,
+            email:        row.email,
+            phone_number: row.phone_number,
+            position:     row.position,
+            department:   row.department,
+            gender:       row.gender,
+            registered_by: user?.username || 'admin',
+          }
+          const res = await api('/staff/', { method: 'POST', body: JSON.stringify(payload) })
+          if (res.status === 201) {
+            created++
+            setLog(prev => [...prev, { status: 'created', message: `✓ ${row.first_name} ${row.last_name} imported` }])
+          } else if (res.status === 400) {
+            const err = await res.json()
+            if (skipExisting && JSON.stringify(err).includes('already')) {
+              skipped++
+              setLog(prev => [...prev, { status: 'skipped', message: `— ${row.first_name} ${row.last_name} already exists` }])
+            } else {
+              errors++
+              setLog(prev => [...prev, { status: 'error', message: `✗ ${row.first_name} ${row.last_name}: ${JSON.stringify(err)}` }])
+            }
+          } else {
+            errors++
+            setLog(prev => [...prev, { status: 'error', message: `✗ ${row.first_name} ${row.last_name}: HTTP ${res.status}` }])
+          }
+        } catch (err) {
+          errors++
+          setLog(prev => [...prev, { status: 'error', message: `✗ ${row.first_name} ${row.last_name}: ${err.message}` }])
+        }
+        setTimeout(() => logRef.current?.scrollTo({ top: 99999, behavior: 'smooth' }), 50)
+      }
+      setSummary({ created, skipped, errors })
+      setImporting(false)
+      onImportDone?.()
+      return
+    }
+
+    // Online streaming import
     try {
       const res = await fetch(`${BASE_URL}/api/staff/import/run/`, {
         method: 'POST',
@@ -196,7 +372,6 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
         throw new Error(err.error || 'Import failed')
       }
 
-      // Read the streaming NDJSON response
       const reader  = res.body.getReader()
       const decoder = new TextDecoder()
       let   buf     = ''
@@ -206,7 +381,7 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
         if (done) break
         buf += decoder.decode(value, { stream: true })
         const lines = buf.split('\n')
-        buf = lines.pop()   // keep incomplete line in buffer
+        buf = lines.pop()
 
         for (const line of lines) {
           if (!line.trim()) continue
@@ -214,7 +389,6 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
             const event = JSON.parse(line)
             if (event.type === 'progress') {
               setLog(prev => [...prev, event])
-              // Auto-scroll log
               setTimeout(() => logRef.current?.scrollTo({ top: 99999, behavior: 'smooth' }), 50)
             } else if (event.type === 'done') {
               setSummary(event)
@@ -230,12 +404,14 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
     }
   }
 
-  // ── Status icon ───────────────────────────────────────────────────────────
   const StatusIcon = ({ status }) => {
     if (status === 'created') return <CheckCircle2 size={13} className="text-green-400 shrink-0" />
     if (status === 'skipped') return <AlertCircle  size={13} className="text-amber-400 shrink-0" />
     return <XCircle size={13} className="text-red-400 shrink-0" />
   }
+
+  const onlineStepLabels  = ['Connect', 'Preview', 'Import']
+  const offlineStepLabels = ['Upload CSV', 'Preview', 'Import']
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -257,10 +433,10 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
             </div>
             <div>
               <h2 className="font-black text-base" style={{ color: 'var(--color-text-main)' }}>
-                Import Staff from Company Database
+                Import Staff from Company DB
               </h2>
               <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                Connect to your hosting company's HR database and import staff records
+                {mode === 'online' ? 'Connect to your HR database remotely' : 'Import from a local CSV export'}
               </p>
             </div>
           </div>
@@ -269,15 +445,43 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
           </button>
         </div>
 
+        {/* Mode Toggle */}
+        {step === 0 && (
+          <div className="flex items-center gap-2 px-6 pt-5 shrink-0">
+            {[
+              { key: 'online',  label: 'Online',  icon: <Wifi size={14} />,    sub: 'Connect to remote database' },
+              { key: 'offline', label: 'Offline', icon: <WifiOff size={14} />, sub: 'Import from CSV file' },
+            ].map(({ key, label, icon, sub }) => (
+              <button
+                key={key}
+                onClick={() => switchMode(key)}
+                className="flex-1 flex items-center gap-3 px-4 py-3 rounded-2xl transition-all text-left"
+                style={{
+                  border: `2px solid ${mode === key ? '#cc0000' : 'var(--color-border-main)'}`,
+                  background: mode === key ? 'rgba(204,0,0,0.07)' : 'var(--color-card-hover)',
+                }}>
+                <span style={{ color: mode === key ? '#cc0000' : 'var(--color-text-muted)' }}>{icon}</span>
+                <div>
+                  <p className="text-sm font-black" style={{ color: mode === key ? 'var(--color-text-main)' : 'var(--color-text-muted)' }}>
+                    {label}
+                  </p>
+                  <p className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>{sub}</p>
+                </div>
+                {mode === key && <Check size={14} className="ml-auto" style={{ color: '#cc0000' }} />}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
-          <Steps current={step} />
+          <Steps current={step} labels={mode === 'online' ? onlineStepLabels : offlineStepLabels} />
 
           <AnimatePresence mode="wait">
 
-            {/* ── Step 0: Connection ── */}
-            {step === 0 && (
-              <motion.div key="step0" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
+            {/* ── ONLINE Step 0: Connection ── */}
+            {mode === 'online' && step === 0 && (
+              <motion.div key="online-step0" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
                           className="space-y-4">
 
                 <div className="grid grid-cols-2 gap-4">
@@ -322,13 +526,8 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
                                placeholder="readonly_user" className={inputCls} autoComplete="off" />
                       </Field>
                       <Field label="Password">
-                        <PasswordInput
-                          value={conn.password}
-                          onChange={e => setConnField('password', e.target.value)}
-                          placeholder="••••••••"
-                          className={inputCls}
-                          autoComplete="new-password"
-                        />
+                        <input type="password" value={conn.password} onChange={e => setConnField('password', e.target.value)}
+                               placeholder="••••••••" className={inputCls} autoComplete="new-password" />
                       </Field>
                     </div>
 
@@ -351,7 +550,7 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
                   </Field>
                 )}
 
-                {/* Field mapping (collapsible) */}
+                {/* Field mapping */}
                 <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--color-border-main)' }}>
                   <button
                     onClick={() => setShowFieldMap(p => !p)}
@@ -385,18 +584,103 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
                   )}
                 </div>
 
-                {/* Info box */}
                 <div className="rounded-2xl p-4 text-xs space-y-1"
                      style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', color: '#93c5fd' }}>
                   <p className="font-semibold">Requirements from your hosting company:</p>
                   <p>• A read-only database user with SELECT access on the staff table</p>
-                  <p>• The database port must be accessible from this server (whitelist this server's IP)</p>
-                  <p>• Face image URLs must be publicly accessible or base64-encoded in the table</p>
+                  <p>• The database port must be accessible from this server</p>
+                  <p>• Face image URLs must be publicly accessible or base64-encoded</p>
                 </div>
               </motion.div>
             )}
 
-            {/* ── Step 1: Preview ── */}
+            {/* ── OFFLINE Step 0: CSV Upload ── */}
+            {mode === 'offline' && step === 0 && (
+              <motion.div key="offline-step0" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
+                          className="space-y-4">
+
+                {/* Drop zone */}
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="rounded-2xl p-8 flex flex-col items-center gap-3 cursor-pointer transition-all"
+                  style={{
+                    border: csvParsed ? '2px solid #22c55e' : '2px dashed var(--color-border-main)',
+                    background: csvParsed ? 'rgba(34,197,94,0.05)' : 'var(--color-card-hover)',
+                  }}>
+                  <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" style={{ display: 'none' }} onChange={handleCSVFile} />
+                  {csvParsed ? (
+                    <>
+                      <CheckCircle2 size={32} className="text-green-400" />
+                      <p className="text-sm font-black" style={{ color: '#22c55e' }}>{csvFileName}</p>
+                      <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{csvRows.length} rows detected — click to replace</p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(204,0,0,0.1)' }}>
+                        <FileText size={22} style={{ color: '#cc0000' }} />
+                      </div>
+                      <p className="text-sm font-black" style={{ color: 'var(--color-text-main)' }}>Click to upload CSV file</p>
+                      <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Supports .csv, .tsv — column names are auto-detected</p>
+                    </>
+                  )}
+                </div>
+
+                {/* Column mapping (shown after file loaded) */}
+                {csvParsed && (
+                  <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--color-border-main)' }}>
+                    <div className="px-4 py-3 flex items-center gap-2 text-sm font-semibold"
+                         style={{ background: 'var(--color-card-hover)', color: 'var(--color-text-main)' }}>
+                      <Link2 size={14} style={{ color: '#cc0000' }} />
+                      Detected Column Mapping
+                      <span className="ml-auto text-xs font-normal" style={{ color: 'var(--color-text-muted)' }}>
+                        Available: {csvHeaders.join(', ')}
+                      </span>
+                    </div>
+                    <div className="p-4 grid grid-cols-2 gap-2"
+                         style={{ borderTop: '1px solid var(--color-border-main)' }}>
+                      {AMECO_FIELDS.slice(0, 8).map(f => (
+                        <div key={f.key} className="flex items-center gap-2">
+                          <span className="text-xs w-28 shrink-0 font-medium" style={{ color: 'var(--color-text-muted)' }}>
+                            {f.label}{f.required && <span className="text-red-400"> *</span>}
+                          </span>
+                          <select
+                            value={csvColMap[f.key] || ''}
+                            onChange={e => setCsvColMap(p => ({ ...p, [f.key]: e.target.value }))}
+                            className={`${inputCls} text-xs`}>
+                            <option value="">— not mapped —</option>
+                            {csvHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                          </select>
+                          {csvColMap[f.key] && <Check size={12} className="text-green-400 shrink-0" />}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Format guide */}
+                <div className="rounded-2xl p-4 text-xs space-y-2"
+                     style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', color: '#93c5fd' }}>
+                  <p className="font-semibold flex items-center gap-1.5"><Info size={12} /> Expected CSV column names (auto-detected):</p>
+                  <div className="grid grid-cols-2 gap-1 font-mono text-[10px]">
+                    {[
+                      ['first_name', 'firstname, fname, first'],
+                      ['last_name',  'lastname, lname, surname'],
+                      ['phone',      'phone_number, mobile, contact'],
+                      ['position',   'job_title, title, role'],
+                      ['department', 'dept, division, team'],
+                      ['email',      'email_address'],
+                    ].map(([field, aliases]) => (
+                      <div key={field} className="flex gap-1">
+                        <span className="text-blue-300 font-bold">{field}:</span>
+                        <span className="opacity-70">{aliases}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {/* ── Step 1: Preview (shared) ── */}
             {step === 1 && (
               <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
                           className="space-y-4">
@@ -420,7 +704,6 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
                 </div>
 
                 <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--color-border-main)' }}>
-                  {/* Table header */}
                   <div className="grid text-[10px] font-black uppercase tracking-wide px-3 py-2"
                        style={{ background: 'var(--color-card-hover)', color: 'var(--color-text-muted)',
                                 gridTemplateColumns: '28px 1fr 1fr 1fr 60px 60px' }}>
@@ -432,7 +715,6 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
                     <span>Faces</span>
                   </div>
 
-                  {/* Rows */}
                   <div className="max-h-[36vh] overflow-y-auto divide-y"
                        style={{ divideColor: 'var(--color-border-main)' }}>
                     {previewRows.map((row, i) => (
@@ -466,19 +748,20 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
 
                 <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                   <span className="font-semibold" style={{ color: '#cc0000' }}>{selected.size}</span> of {previewRows.length} selected
-                  {selected.size > 0 && !previewRows.filter((r,i) => selected.has(i)).some(r => r.has_faces) && (
-                    <span className="text-amber-400 ml-2">⚠ None of the selected records have face images — they will be imported without face recognition</span>
+                  {mode === 'offline' && (
+                    <span className="text-amber-400 ml-2">
+                      ⚠ CSV import won't include face recognition images — you can add them manually later
+                    </span>
                   )}
                 </p>
               </motion.div>
             )}
 
-            {/* ── Step 2: Import progress ── */}
+            {/* ── Step 2: Import progress (shared) ── */}
             {step === 2 && (
               <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
                           className="space-y-4">
 
-                {/* Progress bar */}
                 {importing && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-xs" style={{ color: 'var(--color-text-muted)' }}>
@@ -496,7 +779,6 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
                   </div>
                 )}
 
-                {/* Summary */}
                 {summary && (
                   <div className="grid grid-cols-3 gap-3">
                     {[
@@ -513,12 +795,11 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
                   </div>
                 )}
 
-                {/* Log */}
                 <div ref={logRef}
                      className="rounded-2xl p-3 max-h-[40vh] overflow-y-auto space-y-1 font-mono text-[11px]"
                      style={{ background: '#060606', border: '1px solid rgba(255,255,255,0.06)' }}>
                   {log.length === 0 && importing && (
-                    <p style={{ color: '#555' }}>Connecting to database...</p>
+                    <p style={{ color: '#555' }}>{mode === 'offline' ? 'Processing CSV rows...' : 'Connecting to database...'}</p>
                   )}
                   {log.map((entry, i) => (
                     <div key={i} className="flex items-start gap-2">
@@ -533,7 +814,7 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
                   ))}
                   {summary && (
                     <p className="pt-2 font-bold" style={{ color: '#cc0000' }}>
-                      ✓ Import complete — face recognition cache reloaded.
+                      ✓ Import complete.
                     </p>
                   )}
                 </div>
@@ -565,13 +846,22 @@ export default function ImportStaffModal({ onClose, onImportDone }) {
               </button>
             )}
 
-            {step === 0 && (
+            {step === 0 && mode === 'online' && (
               <button onClick={fetchPreview} disabled={connecting}
                       className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
                       style={{ background: 'linear-gradient(135deg,#cc0000,#aa0000)' }}>
                 {connecting ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />}
                 {connecting ? 'Connecting...' : 'Connect & Preview'}
                 {!connecting && <ChevronRight size={14} />}
+              </button>
+            )}
+
+            {step === 0 && mode === 'offline' && (
+              <button onClick={buildOfflinePreview} disabled={!csvParsed}
+                      className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                      style={{ background: 'linear-gradient(135deg,#cc0000,#aa0000)' }}>
+                <Eye size={14} /> Preview Records
+                <ChevronRight size={14} />
               </button>
             )}
 

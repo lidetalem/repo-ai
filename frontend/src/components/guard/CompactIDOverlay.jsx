@@ -9,6 +9,7 @@
  */
 
 import React, { useEffect, useState, useRef } from 'react'
+import { formatBackendDate } from '../../utils/ethiopianTime'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ShieldCheck, User, UserCheck, Shield,
@@ -168,6 +169,19 @@ export default function CompactIDOverlay({
           <ChevronRight size={12} style={{ color: '#444', flexShrink: 0 }} />
         </div>
 
+        {/* Digital ID card image preview if available */}
+        {person.digital_id_card_image && (
+          <div className="px-3 pb-2">
+            <p className="text-[8px] uppercase tracking-widest mb-1" style={{ color: '#555' }}>Digital ID Card</p>
+            <img
+              src={person.digital_id_card_image.startsWith('http') ? person.digital_id_card_image : `${BASE_URL}${person.digital_id_card_image}`}
+              alt="Digital ID"
+              className="w-full rounded-lg object-contain"
+              style={{ maxHeight: 64, border: `1px solid ${color}30`, background: '#111' }}
+            />
+          </div>
+        )}
+
         {/* Confidence + visitor validity */}
         <div
           className="flex items-center justify-between px-3 pb-2.5"
@@ -189,7 +203,7 @@ export default function CompactIDOverlay({
             <div className="flex items-center gap-1 px-2 py-0.5 rounded-full" style={{ background: 'rgba(245,158,11,0.12)' }}>
               <Clock size={9} style={{ color: '#f59e0b' }} />
               <span className="text-[9px] font-bold" style={{ color: '#f59e0b' }}>
-                Until {new Date(person.valid_until).toLocaleDateString()}
+                Until {formatBackendDate(person.valid_until, 'en', false)}
               </span>
             </div>
           )}

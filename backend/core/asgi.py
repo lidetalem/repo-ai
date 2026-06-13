@@ -17,7 +17,10 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
 
 django_asgi_app = get_asgi_application()
 
-from notifications.routing import websocket_urlpatterns
+try:
+    from notifications.routing import websocket_urlpatterns
+except Exception:
+    websocket_urlpatterns = []
 
 application = ProtocolTypeRouter({
     'http': django_asgi_app,

@@ -18,6 +18,22 @@ class StaffProfileSerializer(serializers.ModelSerializer):
     face_scan_5_base64    = serializers.CharField(write_only=True, required=False, allow_blank=True)
     id_card_front_base64  = serializers.CharField(write_only=True, required=False, allow_blank=True)
     id_card_back_base64   = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    # Read-only image URL fields (populate from BiometricData)
+    face_front = serializers.SerializerMethodField(read_only=True)
+    face_left = serializers.SerializerMethodField(read_only=True)
+    face_right = serializers.SerializerMethodField(read_only=True)
+    face_down = serializers.SerializerMethodField(read_only=True)
+    face_unusual = serializers.SerializerMethodField(read_only=True)
+    # aliases expected by frontend
+    face_scan_1 = serializers.SerializerMethodField(read_only=True)
+    face_scan_2 = serializers.SerializerMethodField(read_only=True)
+    face_scan_3 = serializers.SerializerMethodField(read_only=True)
+    face_scan_4 = serializers.SerializerMethodField(read_only=True)
+    face_scan_5 = serializers.SerializerMethodField(read_only=True)
+    id_card_front = serializers.SerializerMethodField(read_only=True)
+    id_card_back = serializers.SerializerMethodField(read_only=True)
+    profile_image_url = serializers.SerializerMethodField(read_only=True)
+    id_card_image = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = StaffProfile
@@ -163,6 +179,83 @@ class StaffProfileSerializer(serializers.ModelSerializer):
                     logger.error(f'Failed to compute encodings: {e}')
 
             return instance
+
         except Exception as e:
             logger.error(f'Error updating staff profile: {str(e)}', exc_info=True)
             raise
+
+    # Helper to fetch BiometricData for this profile
+    def _get_bio(self, obj):
+        from recognition.models import BiometricData
+        from django.contrib.contenttypes.models import ContentType
+        ct = ContentType.objects.get_for_model(obj)
+        return BiometricData.objects.filter(content_type=ct, object_id=obj.id).first()
+
+    def _url_for(self, request, field):
+        if not request or not field:
+            return None
+        try:
+            return request.build_absolute_uri(field.url)
+        except Exception:
+            return None
+
+    def get_face_front(self, obj):
+        bio = self._get_bio(obj)
+        return self._url_for(self.context.get('request'), getattr(bio, 'face_front', None))
+
+    def get_face_left(self, obj):
+        bio = self._get_bio(obj)
+        return self._url_for(self.context.get('request'), getattr(bio, 'face_left', None))
+
+    def get_face_right(self, obj):
+        bio = self._get_bio(obj)
+        return self._url_for(self.context.get('request'), getattr(bio, 'face_right', None))
+
+    def get_face_down(self, obj):
+        bio = self._get_bio(obj)
+        return self._url_for(self.context.get('request'), getattr(bio, 'face_down', None))
+
+    def get_face_unusual(self, obj):
+        bio = self._get_bio(obj)
+        return self._url_for(self.context.get('request'), getattr(bio, 'face_unusual', None))
+
+    # frontend aliases (face_scan_1..5)
+    def get_face_scan_1(self, obj):
+        return self.get_face_front(obj)
+
+    def get_face_scan_2(self, obj):
+        return self.get_face_left(obj)
+
+    def get_face_scan_3(self, obj):
+        return self.get_face_right(obj)
+
+    def get_face_scan_4(self, obj):
+        return self.get_face_down(obj)
+
+    def get_face_scan_5(self, obj):
+        return self.get_face_unusual(obj)
+
+    def get_id_card_front(self, obj):
+        bio = self._get_bio(obj)
+        return self._url_for(self.context.get('request'), getattr(bio, 'id_card_front', None))
+
+    def get_id_card_back(self, obj):
+        bio = self._get_bio(obj)
+        return self._url_for(self.context.get('request'), getattr(bio, 'id_card_back', None))
+
+    def get_profile_image_url(self, obj):
+        request = self.context.get('request')
+        try:
+            if obj.profile_image:
+                return request.build_absolute_uri(obj.profile_image.url) if request else (obj.profile_image.url if obj.profile_image else None)
+        except Exception:
+            return None
+
+    def get_id_card_image(self, obj):
+        # return existing id_card_image from the profile (not biometric id_card_front/back)
+        request = self.context.get('request')
+        try:
+            if obj.id_card_image:
+                return request.build_absolute_uri(obj.id_card_image.url) if request else (obj.id_card_image.url if obj.id_card_image else None)
+        except Exception:
+            return None

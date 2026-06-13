@@ -17,7 +17,6 @@ urlpatterns = [
     path('api/temporary-requests/', include('visitors.request_urls')),
     path('api/camera/',        include('cameras.urls')),
     path('api/logs/',          include('logs.urls')),
-    path('api/notifications/', include('notifications.urls')),
     path('api/recognition/',   include('recognition.urls')),
     path('api/tts/',           include('tts.urls')),
     path('api/token/refresh/', include('authentication.token_urls')),

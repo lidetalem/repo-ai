@@ -1,9 +1,11 @@
 import React, { useState } from 'react'
 import { usePrivilege } from '../../hooks/usePrivilege'
+import { useLang } from '../../context/LanguageContext'
 import AccessDenied from '../../components/AccessDenied'
-import { ShieldCheck, ScanFace } from 'lucide-react'
+import { ShieldCheck, ScanFace, FileText, CreditCard } from 'lucide-react'
 import SystemLogPage from './Systemlogpage'
 import DetectionLogPage from './Detectionlogpage'
+import DownloadInfoModal from '../../components/DownloadInfoModal'
 
 const TABS = [
   {
@@ -26,13 +28,13 @@ const TABS = [
 
 export default function LogsPage() {
   const { hasPrivilege } = usePrivilege()
+  const { t, lang } = useLang()
 
-  // ALL hooks before any conditional return
   const [activeTab, setActiveTab] = useState('system')
+  const [downloadModal, setDownloadModal] = useState(null) // 'info' | 'idcard' | null
 
   const canAccess = hasPrivilege('view_logs')
 
-  // Now safe to conditionally render
   if (!canAccess) {
     return <AccessDenied privilege="view_logs" />
   }
@@ -42,6 +44,26 @@ export default function LogsPage() {
 
   return (
     <div className="space-y-5">
+
+      {/* ── Action buttons row ── */}
+      <div className="flex items-center justify-end gap-2">
+        <button
+          onClick={() => setDownloadModal('info')}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold"
+          style={{ background: 'var(--color-card-main)', border: '1px solid var(--color-border-main)', color: 'var(--color-text-main)' }}
+        >
+          <FileText size={14} style={{ color: '#3b82f6' }} />
+          {t('downloadInfo') || 'Download Info'}
+        </button>
+        <button
+          onClick={() => setDownloadModal('idcard')}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white"
+          style={{ background: 'linear-gradient(135deg,#cc0000,#aa0000)' }}
+        >
+          <CreditCard size={14} />
+          {t('idDownload') || 'ID Download'}
+        </button>
+      </div>
 
       {/* ── Tab bar ── */}
       <div
@@ -83,6 +105,14 @@ export default function LogsPage() {
 
       {/* ── Active tab content ── */}
       <ActiveComponent />
+
+      {/* ── Download modals ── */}
+      {downloadModal && (
+        <DownloadInfoModal
+          mode={downloadModal}
+          onClose={() => setDownloadModal(null)}
+        />
+      )}
     </div>
   )
 }

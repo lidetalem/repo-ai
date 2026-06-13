@@ -8,7 +8,9 @@ import PrivilegesSection from './PrivilegesSection'
 import { adminsAPI, staffAPI, BASE_URL } from '../../services/api'
 import { useLang } from '../../context/LanguageContext'
 import { usePrivilege } from '../../hooks/usePrivilege'
+import { useAuth } from '../../context/AuthContext'
 import AccessDenied from '../../components/AccessDenied'
+import PersonDetailModal from '../../components/PersonDetailModal'
 
 function getImageUrl(url) {
   if (!url) return null
@@ -47,7 +49,7 @@ function toFormData(fields) {
 // existing StaffProfile.  When linked, the recognition pipeline will return
 // "Admin" (not "Staff") when that person is scanned at an entrance camera.
 
-function StaffLinkSelect({ value, onChange, currentAdminId }) {
+function StaffLinkSelect({ value, onChange, onStaffSelected, currentAdminId }) {
   const [staffList, setStaffList] = useState([])
   const [loading, setLoading]     = useState(true)
 
@@ -58,15 +60,28 @@ function StaffLinkSelect({ value, onChange, currentAdminId }) {
       .finally(() => setLoading(false))
   }, [])
 
+  const handleChange = (e) => {
+    const v = e.target.value
+    if (v === '') {
+      onChange(null)
+      onStaffSelected?.(null)
+    } else {
+      const id = Number(v)
+      onChange(id)
+      const staff = staffList.find(s => s.id === id)
+      onStaffSelected?.(staff || null)
+    }
+  }
+
   return (
     <div className="space-y-1">
       <label className="block text-xs font-semibold" style={{ color: 'var(--color-text-muted)' }}>
         Linked Staff Profile
-        <span className="ml-1 font-normal opacity-70">(optional — for admins who are also staff)</span>
+        <span className="ml-1 font-normal opacity-70">(optional — links staff data to this admin)</span>
       </label>
       <select
         value={value ?? ''}
-        onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+        onChange={handleChange}
         disabled={loading}
         className="w-full px-3 py-2 rounded-xl text-sm border outline-none transition-all"
         style={{
@@ -84,12 +99,12 @@ function StaffLinkSelect({ value, onChange, currentAdminId }) {
       </select>
       {value && (
         <p className="text-xs" style={{ color: '#22c55e' }}>
-          ✓ This admin will be recognised as <strong>Admin</strong> at entrance cameras (not Staff).
+          ✓ Staff data auto-filled into the form. Admin will be recognised as <strong>Admin</strong> at cameras.
         </p>
       )}
       {!value && (
         <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-          If this admin is enrolled as a staff member, link them here so the camera shows their Admin identity.
+          Linking a staff profile auto-fills their personal details into the registration form.
         </p>
       )}
     </div>
@@ -101,6 +116,7 @@ function StaffLinkSelect({ value, onChange, currentAdminId }) {
 export default function AdminsPage() {
   const { t } = useLang()
   const { hasPrivilege } = usePrivilege()
+  const { refreshPrivileges } = useAuth()
 
   const [data, setData]             = useState([])
   const [loading, setLoading]       = useState(true)
@@ -110,6 +126,8 @@ export default function AdminsPage() {
   const [viewItem, setViewItem]     = useState(null)
   const [privileges, setPrivileges] = useState([])
   const [linkedStaff, setLinkedStaff] = useState(null)  // staff profile id or null
+  const [staffPrefill, setStaffPrefill] = useState(null) // staff data to prefill form
+  const [formKey, setFormKey] = useState(0) // force re-mount of form when staff selected
 
   const canAccess = hasPrivilege('manage_admins')
 
@@ -132,11 +150,48 @@ export default function AdminsPage() {
     setSelected(row)
     setPrivileges(Array.isArray(row.privileges) ? row.privileges : [])
     setLinkedStaff(row.linked_staff ?? null)
+    setStaffPrefill(null)
     setShowForm(true)
   }
 
-  const openNew   = () => { setSelected(null); setPrivileges([]); setLinkedStaff(null); setShowForm(true) }
-  const closeForm = () => { setSelected(null); setPrivileges([]); setLinkedStaff(null); setShowForm(false) }
+  const openNew   = () => { setSelected(null); setPrivileges([]); setLinkedStaff(null); setStaffPrefill(null); setShowForm(true) }
+  const closeForm = () => { setSelected(null); setPrivileges([]); setLinkedStaff(null); setStaffPrefill(null); setShowForm(false) }
+
+  const handleStaffSelected = async (staff) => {
+    if (!staff) { setStaffPrefill(null); setFormKey(k => k + 1); return }
+    // Fetch full staff record to get all images and biometric data
+    let fullStaff = staff
+    try {
+      const { data } = await staffAPI.retrieve(staff.id)
+      fullStaff = data
+    } catch {}
+
+    // Build comprehensive prefill — all personal info + all images + all biometrics
+    setStaffPrefill({
+      // Personal info
+      first_name:   fullStaff.first_name   || '',
+      middle_name:  fullStaff.middle_name  || '',
+      last_name:    fullStaff.last_name    || '',
+      phone_number: fullStaff.phone_number || '',
+      email:        fullStaff.email        || '',
+      gender:       fullStaff.gender       || 'M',
+      position:     fullStaff.position     || '',
+      department:   fullStaff.department   || '',
+      description:  fullStaff.description  || '',
+      // Profile & ID card images
+      profile_image:  fullStaff.profile_image  || null,
+      id_card_front:  fullStaff.id_card_front  || fullStaff.id_card_image || null,
+      id_card_back:   fullStaff.id_card_back   || null,
+      // All 5 face biometric images
+      face_front:     fullStaff.face_front     || fullStaff.face_scan_1 || null,
+      face_left:      fullStaff.face_left      || fullStaff.face_scan_2 || null,
+      face_right:     fullStaff.face_right     || fullStaff.face_scan_3 || null,
+      face_down:      fullStaff.face_down      || fullStaff.face_scan_4 || null,
+      face_unusual:   fullStaff.face_unusual   || fullStaff.face_scan_5 || null,
+    })
+    setFormKey(k => k + 1)
+    toast.success(`All data auto-filled from ${fullStaff.first_name || 'Staff'}'s profile`, { icon: '✅' })
+  }
 
   const handleSave = async (form) => {
     setSaving(true)
@@ -164,6 +219,8 @@ export default function AdminsPage() {
       }
       closeForm()
       load()
+      // Refresh current user's privileges immediately so access controls update
+      try { await refreshPrivileges() } catch {}
     } catch (err) {
       const msg =
         err.response?.data?.detail ||
@@ -269,9 +326,9 @@ export default function AdminsPage() {
       {/* ── Add / Edit modal ── */}
       <Modal open={showForm} onClose={closeForm} title={selected ? 'Edit Admin' : t('registerAdmin')} width="max-w-3xl">
         <RegistrationForm
-          key={selected?.id ?? 'new-admin'}
+          key={`${selected?.id ?? 'new-admin'}-${formKey}`}
           type="admin"
-          initialData={selected}
+          initialData={selected ?? staffPrefill ?? undefined}
           editing={!!selected}
           onSubmit={handleSave}
           onCancel={closeForm}
@@ -283,6 +340,7 @@ export default function AdminsPage() {
           <StaffLinkSelect
             value={linkedStaff}
             onChange={setLinkedStaff}
+            onStaffSelected={!selected ? handleStaffSelected : undefined}
             currentAdminId={selected?.id}
           />
         </div>
@@ -293,64 +351,14 @@ export default function AdminsPage() {
         </div>
       </Modal>
 
-      {/* ── View modal ── */}
-      <Modal open={!!viewItem} onClose={() => setViewItem(null)} title="Admin Details">
-        {viewItem && (
-          <div className="space-y-3 text-sm">
-            {viewItem.profile_image && (
-              <div className="flex justify-center mb-2">
-                <img
-                  src={getImageUrl(viewItem.profile_image)}
-                  alt="Profile"
-                  className="w-20 h-20 rounded-2xl object-cover"
-                  style={{ border: '2px solid var(--color-border-main)' }}
-                />
-              </div>
-            )}
-            {[
-              ['Name',        `${viewItem.first_name} ${viewItem.middle_name} ${viewItem.last_name}`],
-              ['Digital ID',  viewItem.digital_id],
-              ['Admin Tag',   viewItem.admin_tag],
-              ['Phone',       viewItem.phone_number],
-              ['Description', viewItem.description],
-            ].map(([label, value]) => (
-              <div key={label} className="flex gap-3">
-                <span className="w-32 flex-shrink-0 font-semibold" style={{ color: 'var(--color-text-muted)' }}>{label}</span>
-                <span style={{ color: 'var(--color-text-main)' }}>{value || '—'}</span>
-              </div>
-            ))}
-
-            {/* Staff link status */}
-            <div className="flex gap-3">
-              <span className="w-32 flex-shrink-0 font-semibold" style={{ color: 'var(--color-text-muted)' }}>Camera Identity</span>
-              {viewItem.linked_staff
-                ? <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full"
-                        style={{ background: 'rgba(34,197,94,0.12)', color: '#16a34a' }}>
-                    <LinkIcon size={11} /> Recognised as Admin at cameras
-                  </span>
-                : <span style={{ color: 'var(--color-text-muted)' }}>
-                    No staff link — enrolled via Admin profile
-                  </span>
-              }
-            </div>
-
-            {Array.isArray(viewItem.privileges) && viewItem.privileges.length > 0 && (
-              <div className="flex gap-3">
-                <span className="w-32 flex-shrink-0 font-semibold" style={{ color: 'var(--color-text-muted)' }}>Privileges</span>
-                <div className="flex flex-wrap gap-1">
-                  {viewItem.privileges.map((p) => (
-                    <span key={p}
-                      className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                      style={{ background: 'rgba(204,0,0,0.12)', color: '#cc0000' }}>
-                      {p.replace(/_/g, ' ')}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </Modal>
+      {/* ── View modal — enhanced ── */}
+      {viewItem && (
+        <PersonDetailModal
+          person={viewItem}
+          type="admin"
+          onClose={() => setViewItem(null)}
+        />
+      )}
     </div>
   )
 }

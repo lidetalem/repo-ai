@@ -16,13 +16,13 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import {
   Plus, Eye, Trash2, Send, Clock, CheckCircle, XCircle,
-  Users, ClipboardList, Search, X, Camera, ChevronDown,
+  Users, ClipboardList, Search, X, Camera, ChevronDown, CalendarClock,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import DataTable from '../../components/DataTable'
 import Modal from '../../components/Modal'
 import RegistrationForm from '../../components/RegistrationForm'
-import { requestsAPI, visitorsAPI } from '../../services/api'
+import { requestsAPI, visitorsAPI, BASE_URL } from '../../services/api'
 import { useLang } from '../../context/LanguageContext'
 import { useAuth } from '../../context/AuthContext'
 import wsManager from '../../services/websocket'
@@ -71,6 +71,8 @@ export default function GuardVisitorRequestsPage() {
   const [viewVisitor,  setViewVisitor]  = useState(null)   // visitor detail modal
   const [viewRequest,  setViewRequest]  = useState(null)   // request detail modal
   const [saving, setSaving]       = useState(false)
+  const [extendModal, setExtendModal] = useState(null)
+  const [newExpiry, setNewExpiry]     = useState('')
 
   // ── request form state (for "quick request" on existing visitor)
   const [selectedVisitorId, setSelectedVisitorId] = useState('')
@@ -88,7 +90,23 @@ export default function GuardVisitorRequestsPage() {
     Promise.all([visitorsAPI.list(), requestsAPI.list()])
       .then(([v, r]) => {
         setVisitors(v.data.results ?? v.data)
-        setRequests(r.data.results ?? r.data)
+        // Normalize visitor image URLs so expired visitors still show photos
+        const raw = v.data.results ?? v.data
+        const norm = (raw || []).map((item) => {
+          const img = item.profile_image || item.profile || null
+          const profile_image = img
+            ? (img.startsWith('http') ? img : `${BASE_URL}${img}`)
+            : null
+          return { ...item, profile_image }
+        })
+        setVisitors(norm)
+        const rawReq = r.data.results ?? r.data
+        const normReq = (rawReq || []).map((item) => {
+          const img = item.visitor_image || item.profile_image || null
+          const visitor_image = img ? (img.startsWith('http') ? img : `${BASE_URL}${img}`) : null
+          return { ...item, visitor_image }
+        })
+        setRequests(normReq)
       })
       .catch(() => toast.error('Failed to load data'))
       .finally(() => setLoading(false))
@@ -123,10 +141,13 @@ export default function GuardVisitorRequestsPage() {
   const handleRegister = async (form) => {
     setSaving(true)
     try {
-      const res = await visitorsAPI.create({
-        ...form,
-        registered_by: user?.username || 'guard',
-      })
+      const payload = { ...form, registered_by: user?.username || 'guard' }
+      // Convert datetime-local value to ISO for expiry_datetime
+      if (payload.date_of_expiry && payload.date_of_expiry.includes('T')) {
+        payload.expiry_datetime = new Date(payload.date_of_expiry).toISOString()
+        payload.date_of_expiry  = payload.date_of_expiry.split('T')[0]
+      }
+      const res = await visitorsAPI.create(payload)
       const newVisitor = res.data
 
       // Auto-submit request for this new visitor
@@ -170,6 +191,22 @@ export default function GuardVisitorRequestsPage() {
       toast.error(typeof msg === 'string' ? msg : JSON.stringify(msg))
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleExtendExpiry = async () => {
+    if (!newExpiry) { toast.error('Please select a new expiry date/time'); return }
+    try {
+      await visitorsAPI.update(extendModal.id, {
+        expiry_datetime: new Date(newExpiry).toISOString(),
+        date_of_expiry:  newExpiry.split('T')[0],
+      })
+      toast.success('Expiry extended!')
+      setExtendModal(null)
+      setNewExpiry('')
+      load()
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to update expiry')
     }
   }
 
@@ -245,6 +282,24 @@ export default function GuardVisitorRequestsPage() {
       render: (v) => (
         <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{v || '—'}</span>
       ),
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      render: (_, row) => {
+        const st = row.status || (row.is_approved ? 'Active' : 'Pending')
+        const cfg = {
+          Active:  { bg: 'rgba(34,197,94,0.12)',  color: '#22c55e', emoji: '✓' },
+          Expired: { bg: 'rgba(239,68,68,0.12)',  color: '#ef4444', emoji: '⏰' },
+          Pending: { bg: 'rgba(245,158,11,0.12)', color: '#f59e0b', emoji: '⌛' },
+        }[st] || { bg: 'rgba(245,158,11,0.12)', color: '#f59e0b', emoji: '⌛' }
+        return (
+          <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                style={{ background: cfg.bg, color: cfg.color }}>
+            {cfg.emoji} {st}
+          </span>
+        )
+      },
     },
   ]
 
@@ -413,6 +468,16 @@ export default function GuardVisitorRequestsPage() {
               >
                 <Send size={14} />
               </button>
+              {(row.status === 'Expired' || (row.date_of_expiry && new Date(row.expiry_datetime || row.date_of_expiry) < new Date())) && (
+                <button
+                  onClick={() => { setExtendModal(row); setNewExpiry((row.expiry_datetime || row.date_of_expiry || '').slice(0,16)) }}
+                  className="p-1.5 rounded-lg transition-colors"
+                  style={{ color: '#f97316' }}
+                  title="Extend Expiry"
+                >
+                  <CalendarClock size={14} />
+                </button>
+              )}
               <button
                 onClick={() => handleDeleteVisitor(row.id)}
                 className="p-1.5 rounded-lg transition-colors"
@@ -501,55 +566,7 @@ export default function GuardVisitorRequestsPage() {
               ))}
             </select>
           </div>
-
-          {/* Reason */}
-          <div>
-            <label
-              className="block text-xs font-semibold mb-1.5 uppercase tracking-wider"
-              style={{ color: 'var(--color-text-muted)' }}
-            >
-              {t('reason')}
-            </label>
-            <textarea
-              className="ameco-input"
-              rows={3}
-              value={reqForm.reason}
-              onChange={(e) => setReqForm((f) => ({ ...f, reason: e.target.value }))}
-              placeholder="Reason for visit…"
-            />
-          </div>
-
-          {/* Date range */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label
-                className="block text-xs font-semibold mb-1.5 uppercase tracking-wider"
-                style={{ color: 'var(--color-text-muted)' }}
-              >
-                {t('startDate')}
-              </label>
-              <input
-                type="date"
-                className="ameco-input"
-                value={reqForm.start_date}
-                onChange={(e) => setReqForm((f) => ({ ...f, start_date: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label
-                className="block text-xs font-semibold mb-1.5 uppercase tracking-wider"
-                style={{ color: 'var(--color-text-muted)' }}
-              >
-                {t('endDate')}
-              </label>
-              <input
-                type="date"
-                className="ameco-input"
-                value={reqForm.end_date}
-                onChange={(e) => setReqForm((f) => ({ ...f, end_date: e.target.value }))}
-              />
-            </div>
-          </div>
+          {/* Per UI rule: only the Select Visitor field is shown in this form. */}
 
           {/* Footer */}
           <div
@@ -715,6 +732,58 @@ export default function GuardVisitorRequestsPage() {
             </div>
           )
         })()}
+      </Modal>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          MODAL: Extend visitor expiry
+      ═══════════════════════════════════════════════════════════════════ */}
+      <Modal
+        open={!!extendModal}
+        onClose={() => { setExtendModal(null); setNewExpiry('') }}
+        title="Extend Visitor Expiry"
+        width="max-w-md"
+      >
+        {extendModal && (
+          <div className="space-y-4">
+            <div className="p-3 rounded-2xl"
+                 style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
+              <p className="text-sm font-semibold" style={{ color: '#ef4444' }}>
+                ⏰ {extendModal.first_name} {extendModal.last_name} — access has expired
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-2 uppercase"
+                     style={{ color: 'var(--color-text-muted)' }}>
+                New Expiry Date &amp; Time
+              </label>
+              <input
+                type="datetime-local"
+                className="ameco-input w-full"
+                value={newExpiry}
+                onChange={(e) => setNewExpiry(e.target.value)}
+                min={new Date().toISOString().slice(0, 16)}
+                step="1"
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => { setExtendModal(null); setNewExpiry('') }}
+                className="px-4 py-2 rounded-xl text-sm font-semibold"
+                style={{ background: 'var(--color-card-hover)', color: 'var(--color-text-muted)',
+                         border: '1px solid var(--color-border-main)' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleExtendExpiry}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-white"
+                style={{ background: 'linear-gradient(135deg,#cc0000,#aa0000)' }}
+              >
+                Extend Access
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
 
     </div>

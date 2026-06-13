@@ -27,7 +27,7 @@ import { Toaster }    from 'react-hot-toast'
 import { ShieldOff, LogIn } from 'lucide-react'
 
 import { AuthProvider, useAuth }  from './context/AuthContext'
-import { NotificationProvider }   from './context/NotificationContext'
+import VisitorNotificationPopup   from './components/VisitorNotificationPopup'
 import { ThemeProvider }          from './context/ThemeContext'
 import { LanguageProvider }       from './context/LanguageContext'
 
@@ -137,7 +137,6 @@ export default function App() {
     <ThemeProvider>
       <LanguageProvider>
         <AuthProvider>
-          <NotificationProvider>
             <BrowserRouter>
               <Toaster
                 position="top-right"
@@ -181,8 +180,8 @@ export default function App() {
                 {/* Catch-all */}
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
+              <VisitorNotificationPopup />
             </BrowserRouter>
-          </NotificationProvider>
         </AuthProvider>
       </LanguageProvider>
     </ThemeProvider>

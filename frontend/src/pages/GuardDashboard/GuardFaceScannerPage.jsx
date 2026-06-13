@@ -8,9 +8,11 @@ import React from 'react'
 import { Scan } from 'lucide-react'
 import LiveCameraFeed from '../../components/guard/LiveCameraFeed'
 import { useAuth } from '../../context/AuthContext'
+import { useLang } from '../../context/LanguageContext'
 
 export default function GuardFaceScannerPage() {
   const { user } = useAuth()
+  const { t, lang } = useLang()
 
   // Get guard's assigned gate from their profile
   const assignedGate = user?.gate_camera_id || 'GATE-01'
@@ -26,10 +28,10 @@ export default function GuardFaceScannerPage() {
         </div>
         <div>
           <h2 className="text-lg font-black" style={{ color: 'var(--color-text-main)' }}>
-            Face Scanner
+            {lang === 'am' ? 'ፊት ቃኝ' : 'Face Scanner'}
           </h2>
           <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            Live face recognition · {assignedGate}
+            {lang === 'am' ? 'ቀጥታ የፊት ማወቂያ' : 'Live face recognition'} · {assignedGate}
           </p>
         </div>
 
@@ -38,7 +40,7 @@ export default function GuardFaceScannerPage() {
              style={{ background: 'rgba(204,0,0,0.1)', border: '1px solid rgba(204,0,0,0.2)' }}>
           <span className="w-2 h-2 rounded-full status-dot-live" style={{ background: '#cc0000' }} />
           <span className="text-xs font-black" style={{ color: '#cc0000' }}>
-            Real-time Recognition Active
+            {lang === 'am' ? 'ቀጥታ ማወቂያ ንቁ ነው' : 'Real-time Recognition Active'}
           </span>
         </div>
       </div>
@@ -48,7 +50,7 @@ export default function GuardFaceScannerPage() {
         {[
           { step: '1', text: 'Start the camera' },
           { step: '2', text: 'Person stands in front' },
-          { step: '3', text: 'Auto-scan every 2 seconds' },
+          { step: '3', text: 'Auto-scan every 0.6 seconds' },
           { step: '4', text: 'ID card pops up on match' },
         ].map(({ step, text }) => (
           <div key={step}

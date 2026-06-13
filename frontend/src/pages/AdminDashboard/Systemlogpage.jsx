@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import DataTable from '../../components/DataTable'
 import { logsAPI } from '../../services/api'
 import { useLang } from '../../context/LanguageContext'
+import { formatBackendDate, formatEthiopianDate } from '../../utils/ethiopianTime'
 
 // ─── System-level action types only ───────────────────────────────────────────
 const SYSTEM_ACTIONS = [
@@ -87,7 +88,7 @@ function SummaryChips({ data, activeFilter, onToggle }) {
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function SystemLogPage() {
-  const { t } = useLang()
+  const { t, lang } = useLang()
 
   const [logs,         setLogs]         = useState([])
   const [loading,      setLoading]      = useState(true)
@@ -122,10 +123,10 @@ export default function SystemLogPage() {
   const columns = [
     {
       key: 'ethiopian_time',
-      label: t('timestamp') || 'Timestamp',
-      render: (v) => (
+      label: t('timestamp') || 'Date / Time (ET)',
+      render: (v, row) => (
         <span className="font-mono text-xs whitespace-nowrap" style={{ color: 'var(--color-text-muted)' }}>
-          {v}
+          {v || (row.timestamp ? formatBackendDate(row.timestamp, lang) : '—')}
         </span>
       ),
     },

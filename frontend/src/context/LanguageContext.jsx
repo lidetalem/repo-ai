@@ -41,6 +41,30 @@ const translations = {
     confidence: 'Confidence', timestamp: 'Time', action: 'Action',
     unknown: 'Unknown', scanResult: 'Scan Result',
     assignedGate: 'Assigned Gate', description: 'Description', tag: 'Tag',
+    // Download & ID features
+    downloadInfo: 'Download Info', idDownload: 'ID Download',
+    downloadInfoTitle: 'Download Person Info', idDownloadTitle: 'Download Digital ID Card',
+    searchPeople: 'Search by name, Digital ID, email, department…',
+    generating: 'Generating…', download: 'Download',
+    // Import modes
+    importOnline: 'Online — Company Database', importOffline: 'Offline — Import from File',
+    importOnlineDesc: 'Connect to remote HR database', importOfflineDesc: 'Upload a CSV file from your computer',
+    browseCsv: 'Browse CSV File', changeCsv: 'Change File',
+    parsePreview: 'Parse & Preview', connectPreview: 'Connect & Preview',
+    // View details
+    personalInfo: 'Personal Information', idCards: 'ID Cards',
+    digitalIdCard: 'Digital ID Card', faceImages: 'Face Registration Images',
+    idCardFront: 'ID Card Front', idCardBack: 'ID Card Back',
+    faceLabel: (i) => ['Front','Left','Right','Down','Angled'][i] || `Face ${i+1}`,
+    registeredAt: 'Registered At', startDate2: 'Start Date', expiryDate: 'Expiry Date',
+    // Scanner
+    unknownFace: 'Unknown face', blockedFor: 'Blocked', seconds: 'seconds',
+    attemptsLeft: 'attempt(s) before block', visitorExpired: 'Visitor EXPIRED',
+    scanAccepted: 'Access Granted', scanDenied: 'Access Denied',
+    // Scanned responses
+    scannedResponses: 'Scanned Responses',
+    // Ethiopian time label
+    ethDateTime: 'Ethiopian Date & Time',
   },
   am: {
     login: 'ግባ', logout: 'ውጣ', username: 'የተጠቃሚ ስም', password: 'የሚስጥር ቃል',
@@ -82,6 +106,29 @@ const translations = {
     confidence: 'እምነት', timestamp: 'ጊዜ', action: 'ድርጊት',
     unknown: 'ያልታወቀ', scanResult: 'የቃኝ ውጤት',
     assignedGate: 'የተመደበ በር', description: 'መግለጫ', tag: 'መለያ',
+    // Download & ID features
+    downloadInfo: 'መረጃ አውርድ', idDownload: 'መታወቂያ አውርድ',
+    downloadInfoTitle: 'የሰው መረጃ አውርድ', idDownloadTitle: 'ዲጂታል መታወቂያ አውርድ',
+    searchPeople: 'በስም፣ ዲጂታል መለያ፣ ኢሜይል ወይም ክፍል ፈልግ…',
+    generating: 'በማዘጋጀት ላይ…', download: 'አውርድ',
+    // Import modes
+    importOnline: 'መስመር ላይ — የኩባንያ ዳታቤዝ', importOffline: 'ከፋይል አስመጣ',
+    importOnlineDesc: 'ወደ የርቀት HR ዳታቤዝ ተገናኝ', importOfflineDesc: 'CSV ፋይል ከኮምፒተር ስቀል',
+    browseCsv: 'CSV ፋይል ምረጥ', changeCsv: 'ፋይል ቀይር',
+    parsePreview: 'አቀናብር & ቅድመ ዕይታ', connectPreview: 'ተገናኝ & ቅድመ ዕይታ',
+    // View details
+    personalInfo: 'የግል መረጃ', idCards: 'መታወቂያ ካርዶች',
+    digitalIdCard: 'ዲጂታል መታወቂያ', faceImages: 'የፊት ምስሎች',
+    idCardFront: 'መታወቂያ ፊት', idCardBack: 'መታወቂያ ኋላ',
+    registeredAt: 'የተመዘገበበት ጊዜ', startDate2: 'መጀመሪያ ቀን', expiryDate: 'የሚያልቅበት ቀን',
+    // Scanner
+    unknownFace: 'ያልታወቀ ፊት', blockedFor: 'ታግዷል', seconds: 'ሰከንድ',
+    attemptsLeft: 'ሙከራ ይቀራል', visitorExpired: 'ጎብኚ ጊዜ አልቋል',
+    scanAccepted: 'ፍቃድ ተሰጠ', scanDenied: 'ፍቃድ ተከለከለ',
+    // Scanned responses
+    scannedResponses: 'የተቃኙ ምላሾች',
+    // Ethiopian time label
+    ethDateTime: 'የኢትዮጵያ ቀን እና ሰዓት',
   },
 }
 
@@ -105,3 +152,5 @@ export function LanguageProvider({ children }) {
 }
 
 export const useLang = () => useContext(LanguageContext)
+// Alias for legacy components that import useLanguage
+export const useLanguage = useLang

@@ -43,7 +43,6 @@ export function AuthProvider({ children }) {
         // Update localStorage with fresh server data
         localStorage.setItem('user_data', JSON.stringify(verified))
         setUser(verified)
-        wsManager.connect(verified.username)
       })
       .catch(() => {
         // Token invalid / expired — wipe everything, force fresh login
@@ -72,7 +71,6 @@ export function AuthProvider({ children }) {
 
     localStorage.setItem('user_data', JSON.stringify(userData))
     setUser(userData)
-    wsManager.connect(data.username)
     return userData
   }, [])
 

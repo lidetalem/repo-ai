@@ -6,12 +6,15 @@
  */
 
 import React, { useEffect, useState } from 'react'
-import { X, User, CheckCircle, ChevronRight } from 'lucide-react'
+import { X, User, CheckCircle, ChevronRight, CreditCard, FileText, Download } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import Modal from '../../components/Modal'
-import { logsAPI } from '../../services/api'
+import { logsAPI, BASE_URL } from '../../services/api'
 import { useLang } from '../../context/LanguageContext'
 import { useAuth } from '../../context/AuthContext'
+import wsManager from '../../services/websocket'
+import DownloadInfoModal from '../../components/DownloadInfoModal'
+import { formatBackendDate } from '../../utils/ethiopianTime'
 
 const ROLE_COLORS = {
   admin:   '#3b82f6',
@@ -34,6 +37,7 @@ export default function GuardScannedPage() {
     catch { return [] }
   })
   const [selected, setSelected] = useState(null)
+  const [downloadModal, setDownloadModal] = useState(null)
   const [loading, setLoading]   = useState(true)
 
   useEffect(() => {
@@ -47,6 +51,38 @@ export default function GuardScannedPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false))
+    // Subscribe to live websocket pushes for new scans
+    const unsub = wsManager.on('*', (data) => {
+      try {
+        if (!data.type) return
+        const t = String(data.type).toUpperCase()
+        if (!t.includes('SCAN_ACCEPT')) return
+        // Build a log-like object compatible with the list; include any provided
+        // `person` payload so the guard can view full details or download ID.
+        const personPayload = data.person || data.person_detail || data.person_payload || null
+        const actorImage = data.actor_image || data.image || (personPayload && (personPayload.profile_image || personPayload.profile)) || null
+        const actorImageUrl = actorImage && actorImage.startsWith ? (actorImage.startsWith('http') ? actorImage : `${BASE_URL}${actorImage}`) : actorImage
+
+        const entry = {
+          id: data.id || Date.now(),
+          actor_name: data.name || data.guard || data.actor_name || data.actor_username,
+          actor_username: data.actor_username,
+          actor_image: actorImageUrl,
+          actor_role: data.role || data.actor_role || data.role_name || 'visitor',
+          description: data.visitor_name || data.message || data.description || '',
+          action_type: 'SCAN_ACCEPTED',
+          ethiopian_time: data.ethiopian_time || formatBackendDate(new Date(), lang),
+          timestamp: data.timestamp || new Date().toISOString(),
+          gate_camera_id: data.gate_camera_id || data.camera_id || data.terminal_id,
+          confidence: data.confidence,
+          digital_id_card_image: data.digital_id_card_image,
+          id_card_generated: data.id_card_generated,
+          person: personPayload,
+        }
+        setLogs(prev => [entry, ...prev].slice(0, 100))
+      } catch (_) {}
+    })
+    return () => unsub && unsub()
   }, [])
 
   const dismiss = (id) => {
@@ -59,7 +95,7 @@ export default function GuardScannedPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-1">
         <CheckCircle size={18} style={{ color: '#22c55e' }} />
         <h3 className="text-lg font-black" style={{ color: 'var(--color-text-main)' }}>
           {lang === 'am' ? 'የተቃኙ ምላሾች' : 'Scanned Responses'}
@@ -68,6 +104,14 @@ export default function GuardScannedPage() {
           ({visible.length})
         </span>
       </div>
+      <button
+        onClick={() => setDownloadModal('idcard')}
+        className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white ml-auto shrink-0"
+        style={{ background: 'linear-gradient(135deg,#cc0000,#aa0000)' }}
+      >
+        <CreditCard size={14} />
+        {lang === 'am' ? 'መታወቂያ አውርድ' : 'ID Download'}
+      </button>
 
       {loading ? (
         <div className="flex justify-center py-16">
@@ -113,7 +157,7 @@ export default function GuardScannedPage() {
                   </button>
 
                   {/* Profile image */}
-                  <div className="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 flex items-center justify-center"
+                     <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 flex items-center justify-center"
                        style={{ background: 'var(--color-card-hover)' }}>
                     {log.actor_image ? (
                       <img src={`http://127.0.0.1:8000${log.actor_image}`} alt=""
@@ -130,7 +174,7 @@ export default function GuardScannedPage() {
                          style={{ color: 'var(--color-text-main)' }}>
                         {log.actor_name || log.actor_username || 'Unknown'}
                       </p>
-                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full flex-shrink-0"
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-full shrink-0"
                             style={{ background: `${roleColor}20`, color: roleColor }}>
                         {log.actor_role?.toUpperCase() || 'N/A'}
                       </span>
@@ -144,7 +188,7 @@ export default function GuardScannedPage() {
                   </div>
 
                   {/* Access granted badge */}
-                  <div className="flex items-center gap-1 flex-shrink-0">
+                  <div className="flex items-center gap-1 shrink-0">
                     <CheckCircle size={14} style={{ color: '#22c55e' }} />
                     <span className="text-xs font-bold" style={{ color: '#22c55e' }}>Granted</span>
                   </div>
@@ -157,15 +201,15 @@ export default function GuardScannedPage() {
         </div>
       )}
 
-      {/* Detail Modal */}
-      <Modal open={!!selected} onClose={() => setSelected(null)} title="Scan Detail" width="max-w-md">
+      {/* Detail Modal — enhanced */}
+      <Modal open={!!selected} onClose={() => setSelected(null)} title="Scan Detail" width="max-w-lg">
         {selected && (
           <div className="space-y-4">
             {/* Profile image */}
             {selected.actor_image && (
               <div className="flex justify-center">
                 <img
-                  src={`http://127.0.0.1:8000${selected.actor_image}`}
+                  src={selected.actor_image.startsWith('http') ? selected.actor_image : `${BASE_URL}${selected.actor_image}`}
                   alt=""
                   className="w-24 h-24 rounded-2xl object-cover"
                   style={{ border: '3px solid #22c55e' }}
@@ -181,11 +225,11 @@ export default function GuardScannedPage() {
                 ['Description',  selected.description],
                 ['Gate/Camera',  selected.gate_camera_id],
                 ['Ethiopian Time', selected.ethiopian_time],
-                ['UTC Time',     selected.timestamp ? new Date(selected.timestamp).toLocaleString() : '—'],
+                ['Ethiopian Time', selected.ethiopian_time || (selected.timestamp ? formatBackendDate(selected.timestamp, lang) : '—')],
                 ['Confidence',   selected.confidence ? `${selected.confidence}%` : '—'],
               ].map(([label, value]) => (
                 <div key={label} className="flex gap-3">
-                  <span className="w-32 flex-shrink-0 font-semibold"
+                  <span className="w-32 shrink-0 font-semibold"
                         style={{ color: 'var(--color-text-muted)' }}>
                     {label}
                   </span>
@@ -193,9 +237,53 @@ export default function GuardScannedPage() {
                 </div>
               ))}
             </div>
+
+            {/* Digital ID Card image if available */}
+            {(selected.digital_id_card_image || selected.id_card_generated) && (
+              <div className="mt-4">
+                <p className="text-[10px] font-black uppercase tracking-widest mb-2"
+                   style={{ color: 'var(--color-text-muted)' }}>Digital ID Card</p>
+                <img
+                  src={`${BASE_URL}${selected.digital_id_card_image || selected.id_card_generated}`}
+                  alt="Digital ID Card"
+                  className="w-full rounded-2xl object-contain"
+                  style={{ border: '1px solid var(--color-border-main)', maxHeight: 200 }}
+                />
+              </div>
+            )}
+
+            {/* Download exact ID for this scan */}
+            <div className="flex justify-end">
+              <button
+                onClick={() => {
+                  const initialPerson = selected.person || {
+                    profile_image: selected.actor_image && (selected.actor_image.startsWith('http') ? selected.actor_image : `${BASE_URL}${selected.actor_image}`),
+                    digital_id_card_image: selected.digital_id_card_image || selected.id_card_generated,
+                    first_name: selected.actor_name || selected.actor_username,
+                    digital_id: selected.actor_username,
+                    id_card_generated: selected.id_card_generated,
+                  }
+                  window.__initialDownloadPerson__ = initialPerson
+                  setDownloadModal('idcard')
+                  setSelected(null)
+                }}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-white shrink-0"
+                style={{ background: 'linear-gradient(135deg,#cc0000,#aa0000)' }}
+              >
+                <Download size={14} />&nbsp;Download ID
+              </button>
+            </div>
           </div>
         )}
       </Modal>
+
+      {/* Download Modal */}
+      {downloadModal && (
+        <DownloadInfoModal
+          mode={downloadModal}
+          onClose={() => setDownloadModal(null)}
+        />
+      )}
     </div>
   )
 }

@@ -1,25 +1,39 @@
+/**
+ * CaptureSystem.jsx — Biometric capture slots for AMECO registration
+ *
+ * Features:
+ *  • Pre-fills slots with existing images when editing (no separate "Existing Images" section)
+ *  • Existing images shown inline in their correct slot — profile, id_front, id_back, all 5 faces
+ *  • Images that start with http/relative URL are displayed directly; base64 from new captures too
+ *  • Click any slot to retake (opens camera modal)
+ */
+
 import { useRef, useState, useCallback, useEffect } from 'react'
 import Webcam from 'react-webcam'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Camera, RefreshCw, CheckCircle, X, CreditCard, ChevronRight } from 'lucide-react'
 
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+
+function resolveImageSrc(value) {
+  if (!value) return null
+  if (value.startsWith('data:') || value.startsWith('blob:') || value.startsWith('http')) return value
+  // Relative URL from backend — prepend base
+  return `${BASE_URL}${value.startsWith('/') ? '' : '/'}${value}`
+}
+
+// ── SVG face angle guides ─────────────────────────────────────────────────────
 const FaceGuide = ({ angle = 'front', size = 120 }) => {
   const guides = {
     front: (
       <g transform={`translate(${size/2},${size/2})`}>
-        {/* Head */}
         <ellipse cx="0" cy="-8" rx="32" ry="38" fill="none" stroke="rgba(204,0,0,0.5)" strokeWidth="2" strokeDasharray="4 3"/>
-        {/* Eyes */}
         <ellipse cx="-11" cy="-14" rx="5" ry="3.5" fill="none" stroke="rgba(204,0,0,0.5)" strokeWidth="1.5"/>
         <ellipse cx="11"  cy="-14" rx="5" ry="3.5" fill="none" stroke="rgba(204,0,0,0.5)" strokeWidth="1.5"/>
-        {/* Nose */}
         <path d="M-4,-6 L0,4 L4,-6" fill="none" stroke="rgba(204,0,0,0.4)" strokeWidth="1.5" strokeLinejoin="round"/>
-        {/* Mouth */}
         <path d="M-10,12 Q0,18 10,12" fill="none" stroke="rgba(204,0,0,0.5)" strokeWidth="1.5"/>
-        {/* Ears */}
         <ellipse cx="-34" cy="-8" rx="4" ry="8" fill="none" stroke="rgba(204,0,0,0.4)" strokeWidth="1.5"/>
         <ellipse cx="34"  cy="-8" rx="4" ry="8" fill="none" stroke="rgba(204,0,0,0.4)" strokeWidth="1.5"/>
-        {/* Neck */}
         <line x1="-8" y1="30" x2="-8" y2="42" stroke="rgba(204,0,0,0.3)" strokeWidth="1.5"/>
         <line x1="8"  y1="30" x2="8"  y2="42" stroke="rgba(204,0,0,0.3)" strokeWidth="1.5"/>
       </g>
@@ -55,16 +69,12 @@ const FaceGuide = ({ angle = 'front', size = 120 }) => {
     ),
     unusual: (
       <g transform={`translate(${size/2},${size/2})`}>
-        {/* Head */}
         <ellipse cx="0" cy="-8" rx="32" ry="38" fill="none" stroke="rgba(204,0,0,0.5)" strokeWidth="2" strokeDasharray="4 3"/>
-        {/* Glasses */}
         <rect x="-22" y="-20" width="18" height="10" rx="4" fill="none" stroke="rgba(204,0,0,0.7)" strokeWidth="1.5"/>
         <rect x="4"   y="-20" width="18" height="10" rx="4" fill="none" stroke="rgba(204,0,0,0.7)" strokeWidth="1.5"/>
         <line x1="-4" y1="-15" x2="4" y2="-15" stroke="rgba(204,0,0,0.6)" strokeWidth="1.5"/>
-        {/* Hat */}
         <rect x="-36" y="-52" width="72" height="10" rx="3" fill="none" stroke="rgba(204,0,0,0.7)" strokeWidth="1.5"/>
         <rect x="-24" y="-72" width="48" height="22" rx="4" fill="none" stroke="rgba(204,0,0,0.7)" strokeWidth="1.5"/>
-        {/* Mouth */}
         <path d="M-10,12 Q0,18 10,12" fill="none" stroke="rgba(204,0,0,0.5)" strokeWidth="1.5"/>
       </g>
     ),
@@ -76,7 +86,6 @@ const FaceGuide = ({ angle = 'front', size = 120 }) => {
   )
 }
 
-// ── ID Card frame guide ───────────────────────────────────────────────────────
 const IDCardGuide = ({ width = 240, height = 150 }) => (
   <div style={{
     position:'absolute', top:'50%', left:'50%',
@@ -86,7 +95,6 @@ const IDCardGuide = ({ width = 240, height = 150 }) => (
     borderRadius:'12px',
     pointerEvents:'none',
   }}>
-    {/* Corner accents */}
     {[
       { top:'-2px', left:'-2px', borderTop:'3px solid #cc0000', borderLeft:'3px solid #cc0000' },
       { top:'-2px', right:'-2px', borderTop:'3px solid #cc0000', borderRight:'3px solid #cc0000' },
@@ -95,7 +103,6 @@ const IDCardGuide = ({ width = 240, height = 150 }) => (
     ].map((style, i) => (
       <div key={i} style={{ position:'absolute', width:'18px', height:'18px', ...style }} />
     ))}
-    {/* Animated laser line */}
     <div style={{ position:'absolute', inset:0, overflow:'hidden', borderRadius:'10px' }}>
       <motion.div
         animate={{ y: ['0%', '100%', '0%'] }}
@@ -112,21 +119,17 @@ const IDCardGuide = ({ width = 240, height = 150 }) => (
   </div>
 )
 
-// ── Unusual Wear pre-animation ────────────────────────────────────────────────
 function UnusualWearIntro({ onContinue }) {
-  const [step, setStep] = useState(0) // 0=glasses, 1=hat, 2=ready
-
+  const [step, setStep] = useState(0)
   useEffect(() => {
     const t1 = setTimeout(() => setStep(1), 2000)
     const t2 = setTimeout(() => setStep(2), 4000)
     return () => { clearTimeout(t1); clearTimeout(t2) }
   }, [])
-
   return (
     <div className="flex flex-col items-center justify-center p-8 gap-6 text-center"
          style={{ background:'var(--color-card-main)', borderRadius:'1.5rem', maxWidth:'340px', margin:'0 auto' }}>
-      <div className="w-24 h-24 rounded-2xl flex items-center justify-center"
-           style={{ background:'rgba(204,0,0,0.1)' }}>
+      <div className="w-24 h-24 rounded-2xl flex items-center justify-center" style={{ background:'rgba(204,0,0,0.1)' }}>
         <AnimatePresence mode="wait">
           {step === 0 && (
             <motion.div key="glasses" initial={{ opacity:0,scale:0.5 }} animate={{ opacity:1,scale:1 }} exit={{ opacity:0,scale:0.5 }}>
@@ -152,7 +155,6 @@ function UnusualWearIntro({ onContinue }) {
           )}
         </AnimatePresence>
       </div>
-
       <div>
         <p className="font-black text-sm" style={{ color:'var(--color-text-main)' }}>
           {step === 0 && 'Put on your glasses'}
@@ -166,12 +168,10 @@ function UnusualWearIntro({ onContinue }) {
           }
         </p>
       </div>
-
       {step === 2 && (
-        <button
-          onClick={onContinue}
-          className="flex items-center gap-2 px-6 py-3 rounded-xl text-white font-bold text-sm"
-          style={{ background:'linear-gradient(135deg,#cc0000,#aa0000)' }}>
+        <button onClick={onContinue}
+                className="flex items-center gap-2 px-6 py-3 rounded-xl text-white font-bold text-sm"
+                style={{ background:'linear-gradient(135deg,#cc0000,#aa0000)' }}>
           Continue to Final Scan <ChevronRight size={16}/>
         </button>
       )}
@@ -180,23 +180,18 @@ function UnusualWearIntro({ onContinue }) {
 }
 
 function CaptureModal({ slot, onCapture, onClose }) {
-  const webcamRef    = useRef(null)
+  const webcamRef = useRef(null)
   const [countdown, setCountdown] = useState(3)
-  const [ready, setReady]         = useState(false)
+  const [ready, setReady] = useState(false)
   const [showIntro, setShowIntro] = useState(slot.key === 'unusual')
 
-  // countdown
   useEffect(() => {
     if (showIntro || !ready) return
-    if (countdown <= 0) {
-      handleCapture()
-      return
-    }
+    if (countdown <= 0) { handleCapture(); return }
     const t = setTimeout(() => setCountdown(c => c - 1), 1000)
     return () => clearTimeout(t)
   }, [countdown, ready, showIntro])
 
-  // start countdown 1s after modal opens (not unusual intro)
   useEffect(() => {
     if (showIntro) return
     const t = setTimeout(() => setReady(true), 800)
@@ -205,13 +200,10 @@ function CaptureModal({ slot, onCapture, onClose }) {
 
   const handleCapture = useCallback(() => {
     const img = webcamRef.current?.getScreenshot()
-    if (img) {
-      onCapture(img); 
-      onClose()
-    }
+    if (img) { onCapture(img); onClose() }
   }, [onCapture, onClose])
 
-  const isIDSlot      = slot.key === 'id_front' || slot.key === 'id_back'
+  const isIDSlot = slot.key === 'id_front' || slot.key === 'id_back'
   const isProfileSlot = slot.key === 'profile'
 
   return (
@@ -219,8 +211,6 @@ function CaptureModal({ slot, onCapture, onClose }) {
          style={{ background:'rgba(0,0,0,0.85)', backdropFilter:'blur(8px)' }}>
       <div className="relative w-full max-w-md mx-4 rounded-3xl overflow-hidden"
            style={{ background:'#0a0a0a', border:'1px solid rgba(255,255,255,0.1)' }}>
-
-        {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b"
              style={{ borderColor:'rgba(255,255,255,0.08)' }}>
           <div>
@@ -232,8 +222,6 @@ function CaptureModal({ slot, onCapture, onClose }) {
             <X size={14}/>
           </button>
         </div>
-
-        {/* Body */}
         <div className="p-5">
           {showIntro ? (
             <UnusualWearIntro onContinue={() => setShowIntro(false)}/>
@@ -243,13 +231,11 @@ function CaptureModal({ slot, onCapture, onClose }) {
               <Webcam
                 ref={webcamRef}
                 screenshotFormat="image/jpeg"
-                screenshotQuality={0.85}
+                screenshotQuality={0.88}
                 videoConstraints={{ facingMode:'user', width:480, height: isIDSlot ? 300 : 480 }}
                 className="w-full h-full object-cover"
                 style={{ filter:'brightness(1.05)' }}
               />
-
-              {/* Guide overlay */}
               {isIDSlot && <IDCardGuide/>}
               {isProfileSlot && (
                 <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', pointerEvents:'none' }}>
@@ -261,8 +247,6 @@ function CaptureModal({ slot, onCapture, onClose }) {
                   <FaceGuide angle={slot.key} size={200}/>
                 </div>
               )}
-
-              {/* Countdown overlay */}
               {ready && countdown > 0 && (
                 <div className="absolute inset-0 flex items-center justify-center">
                   <motion.div
@@ -279,14 +263,11 @@ function CaptureModal({ slot, onCapture, onClose }) {
             </div>
           )}
         </div>
-
-        {/* Controls */}
         {!showIntro && (
           <div className="flex items-center justify-center gap-3 px-5 pb-5">
-            <button
-              onClick={handleCapture}
-              className="flex items-center gap-2 px-8 py-3 rounded-2xl text-white font-black text-sm"
-              style={{ background:'linear-gradient(135deg,#cc0000,#aa0000)' }}>
+            <button onClick={handleCapture}
+                    className="flex items-center gap-2 px-8 py-3 rounded-2xl text-white font-black text-sm"
+                    style={{ background:'linear-gradient(135deg,#cc0000,#aa0000)' }}>
               <Camera size={16}/> Capture Now
             </button>
           </div>
@@ -296,20 +277,18 @@ function CaptureModal({ slot, onCapture, onClose }) {
   )
 }
 
-// ── Single slot card ──────────────────────────────────────────────────────────
-function SlotCard({ slot, value, onCapture }) {
+// ── Single capture slot ───────────────────────────────────────────────────────
+function SlotCard({ slot, value, onCapture, isExisting = false }) {
   const [showModal, setShowModal] = useState(false)
-  const [hovered,   setHovered]   = useState(false)
-  const filled = !!value
+  const [hovered, setHovered]     = useState(false)
+  const resolvedSrc = resolveImageSrc(value)
+  const filled = !!resolvedSrc
 
   return (
     <>
-      <div
-        className="flex flex-col items-center gap-2"
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-      >
-        {/* Slot visual */}
+      <div className="flex flex-col items-center gap-2"
+           onMouseEnter={() => setHovered(true)}
+           onMouseLeave={() => setHovered(false)}>
         <div
           className="relative cursor-pointer transition-all duration-200 overflow-hidden"
           style={{
@@ -317,20 +296,18 @@ function SlotCard({ slot, value, onCapture }) {
             height: slot.wide ? '100px' : '110px',
             borderRadius:'16px',
             border: filled
-              ? '2.5px solid #22c55e'
+              ? (isExisting ? '2.5px solid #3b82f6' : '2.5px solid #22c55e')
               : '2px dashed rgba(204,0,0,0.4)',
             boxShadow: filled
-              ? '0 0 18px rgba(34,197,94,0.4)'
+              ? (isExisting ? '0 0 14px rgba(59,130,246,0.35)' : '0 0 18px rgba(34,197,94,0.4)')
               : hovered ? '0 0 12px rgba(204,0,0,0.3)' : 'none',
             background: 'var(--color-bg-secondary)',
-            transition: 'all 0.25s ease',
           }}
           onClick={() => setShowModal(true)}
         >
           {filled ? (
             <>
-              <img src={value} alt="" className="w-full h-full object-cover"/>
-              {/* Retake overlay on hover */}
+              <img src={resolvedSrc} alt="" className="w-full h-full object-cover"/>
               {hovered && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-1"
                      style={{ background:'rgba(0,0,0,0.65)' }}>
@@ -338,11 +315,16 @@ function SlotCard({ slot, value, onCapture }) {
                   <span className="text-white text-[10px] font-black">Retake</span>
                 </div>
               )}
-              {/* Green check */}
               <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full flex items-center justify-center"
-                   style={{ background:'#22c55e' }}>
+                   style={{ background: isExisting ? '#3b82f6' : '#22c55e' }}>
                 <CheckCircle size={12} color="white"/>
               </div>
+              {isExisting && !hovered && (
+                <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[8px] font-black"
+                     style={{ background:'rgba(59,130,246,0.85)', color:'white' }}>
+                  SAVED
+                </div>
+              )}
             </>
           ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-2">
@@ -354,15 +336,12 @@ function SlotCard({ slot, value, onCapture }) {
             </div>
           )}
         </div>
-
-        {/* Label */}
         <p className="text-[11px] font-bold uppercase tracking-wide text-center"
-           style={{ color: filled ? '#22c55e' : 'var(--color-text-muted)', maxWidth:'110px' }}>
+           style={{ color: filled ? (isExisting ? '#3b82f6' : '#22c55e') : 'var(--color-text-muted)', maxWidth:'110px' }}>
           {slot.label}
         </p>
       </div>
 
-      {/* Webcam Modal */}
       {showModal && (
         <CaptureModal
           slot={slot}
@@ -374,18 +353,19 @@ function SlotCard({ slot, value, onCapture }) {
   )
 }
 
-// ── Main CaptureSystem export ─────────────────────────────────────────────────
-export default function CaptureSystem({ values = {}, onChange }) {
+// ── Main CaptureSystem ────────────────────────────────────────────────────────
+export default function CaptureSystem({ values = {}, onChange, existingImages = {} }) {
+  // Merge: new captures override existing images in display
+  const merged = { ...existingImages, ...values }
+
   const handleCapture = (key, img) => {
     onChange({ ...values, [key]: img })
   }
 
   const SLOTS = [
-    // Profile photo
     {
       key:'profile', label:'Profile Photo', wide:false,
-      instruction:'Align your face with the guide',
-      emptyText:'Tap to capture',
+      instruction:'Align your face with the guide', emptyText:'Tap to capture',
       EmptyIcon: () => (
         <svg width="40" height="40" viewBox="0 0 40 40">
           <ellipse cx="20" cy="14" rx="10" ry="12" fill="none" stroke="rgba(204,0,0,0.4)" strokeWidth="1.5" strokeDasharray="3 2"/>
@@ -393,49 +373,59 @@ export default function CaptureSystem({ values = {}, onChange }) {
         </svg>
       ),
     },
-    // ID Front
     {
       key:'id_front', label:'ID Card — Front', wide:true,
-      instruction:'Place ID card inside the dashed frame',
-      emptyText:'Tap to capture',
+      instruction:'Place ID card inside the dashed frame', emptyText:'Tap to capture',
       EmptyIcon: () => <CreditCard size={28} style={{ color:'rgba(204,0,0,0.4)' }}/>,
     },
-    // ID Back
     {
       key:'id_back', label:'ID Card — Back', wide:true,
-      instruction:'Flip ID card, place inside frame',
-      emptyText:'Tap to capture',
+      instruction:'Flip ID card, place inside frame', emptyText:'Tap to capture',
       EmptyIcon: () => <CreditCard size={28} style={{ color:'rgba(204,0,0,0.4)', transform:'scaleX(-1)' }}/>,
     },
   ]
 
   const FACE_SLOTS = [
-    { key:'front',   label:'Face — Front',   instruction:'Look directly at the camera',      emptyText:'Front angle' },
-    { key:'left',    label:'Face — Left',    instruction:'Turn your head to the LEFT',        emptyText:'Left angle'  },
-    { key:'right',   label:'Face — Right',   instruction:'Turn your head to the RIGHT',       emptyText:'Right angle' },
-    { key:'down',    label:'Face — Down',    instruction:'Tilt your head DOWN toward chest',  emptyText:'Down angle'  },
-    { key:'unusual', label:'Unusual Wear',   instruction:'With glasses/hat — put them on first', emptyText:'With accessories' },
+    { key:'front',   label:'Face — Front',   instruction:'Look directly at the camera',          emptyText:'Front angle'      },
+    { key:'left',    label:'Face — Left',    instruction:'Turn your head to the LEFT',            emptyText:'Left angle'       },
+    { key:'right',   label:'Face — Right',   instruction:'Turn your head to the RIGHT',           emptyText:'Right angle'      },
+    { key:'down',    label:'Face — Down',    instruction:'Tilt your head DOWN toward chest',      emptyText:'Down angle'       },
+    { key:'unusual', label:'Unusual Wear',   instruction:'With glasses/hat — put them on first',  emptyText:'With accessories' },
   ].map(s => ({
-    ...s,
-    wide: false,
+    ...s, wide: false,
     EmptyIcon: () => <FaceGuide angle={s.key} size={60}/>,
   }))
 
-  const allSlots  = [...SLOTS, ...FACE_SLOTS]
-  const filledCount = allSlots.filter(s => values[s.key]).length
+  const allSlots     = [...SLOTS, ...FACE_SLOTS]
+  const filledCount  = allSlots.filter(s => merged[s.key]).length
+  const newCount     = allSlots.filter(s => values[s.key]).length
+  const existingCount = allSlots.filter(s => existingImages[s.key] && !values[s.key]).length
 
   return (
     <div className="space-y-6">
-
       {/* Progress bar */}
       <div>
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs font-bold uppercase tracking-wider" style={{ color:'var(--color-text-muted)' }}>
             Biometric Capture
           </p>
-          <p className="text-xs font-bold" style={{ color: filledCount === allSlots.length ? '#22c55e' : 'var(--color-text-muted)' }}>
-            {filledCount}/{allSlots.length} captured
-          </p>
+          <div className="flex items-center gap-3">
+            {existingCount > 0 && (
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                    style={{ background:'rgba(59,130,246,0.12)', color:'#3b82f6' }}>
+                {existingCount} saved
+              </span>
+            )}
+            {newCount > 0 && (
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                    style={{ background:'rgba(34,197,94,0.12)', color:'#22c55e' }}>
+                {newCount} new
+              </span>
+            )}
+            <p className="text-xs font-bold" style={{ color: filledCount === allSlots.length ? '#22c55e' : 'var(--color-text-muted)' }}>
+              {filledCount}/{allSlots.length}
+            </p>
+          </div>
         </div>
         <div className="h-1.5 rounded-full overflow-hidden" style={{ background:'var(--color-border-main)' }}>
           <motion.div
@@ -445,30 +435,45 @@ export default function CaptureSystem({ values = {}, onChange }) {
             style={{ background:'linear-gradient(90deg,#cc0000,#22c55e)' }}
           />
         </div>
+        {existingCount > 0 && (
+          <p className="text-[10px] mt-1.5" style={{ color:'#3b82f6' }}>
+            ℹ Blue border = previously saved image. Click to retake. Green border = newly captured.
+          </p>
+        )}
       </div>
 
       {/* Profile + ID Cards */}
       <div>
-        <p className="text-[10px] font-black uppercase tracking-widest mb-3"
-           style={{ color:'#cc0000' }}>
+        <p className="text-[10px] font-black uppercase tracking-widest mb-3" style={{ color:'#cc0000' }}>
           Profile & ID Cards
         </p>
         <div className="flex flex-wrap gap-5 items-start">
           {SLOTS.map(slot => (
-            <SlotCard key={slot.key} slot={slot} value={values[slot.key]} onCapture={handleCapture}/>
+            <SlotCard
+              key={slot.key}
+              slot={slot}
+              value={merged[slot.key]}
+              onCapture={handleCapture}
+              isExisting={!!existingImages[slot.key] && !values[slot.key]}
+            />
           ))}
         </div>
       </div>
 
       {/* Face scan angles */}
       <div>
-        <p className="text-[10px] font-black uppercase tracking-widest mb-3"
-           style={{ color:'#cc0000' }}>
+        <p className="text-[10px] font-black uppercase tracking-widest mb-3" style={{ color:'#cc0000' }}>
           Face Scan — 5 Angles
         </p>
         <div className="flex flex-wrap gap-5 items-start">
           {FACE_SLOTS.map(slot => (
-            <SlotCard key={slot.key} slot={slot} value={values[slot.key]} onCapture={handleCapture}/>
+            <SlotCard
+              key={slot.key}
+              slot={slot}
+              value={merged[slot.key]}
+              onCapture={handleCapture}
+              isExisting={!!existingImages[slot.key] && !values[slot.key]}
+            />
           ))}
         </div>
       </div>

@@ -32,7 +32,6 @@ INSTALLED_APPS = [
     'visitors',
     'cameras',
     'logs',
-    'notifications',
     'recognition',
     'tts',
 ]
